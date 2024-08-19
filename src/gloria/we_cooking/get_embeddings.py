@@ -211,27 +211,41 @@ class GlorIA(Gen4EnvSinglePlayer):
                     f"Il dizionario delle last used move ha ecceduto il 
                     numero di pokémon totali \n\n{self.last_move_dict}"
             
+    
+    def get_weight_bin(self, weight: float):
+        if weight < 10:
+            return -1
+        elif 10 <= weight < 25:
+            return -2 
+        elif 25 <= weight < 50:
+            return -3
+        elif 50 <= weight < 100:
+            return -4
+        elif 100 <= weight < 200:
+            return -5
+        else:
+            return -6
+
 
     def get_pokemons(self, battle: Battle):
+        pokemons_encoding = []
         all_mons = battle.team() | battle.opponent_team()
         for mon_name in all_mons:
             mon: Pokemon = all_mons[mon_name]
-            species = POKEMONS[mon.species]
-            ability = ABILITIES[mon.ability]
-            item = ITEMS[mon.item]
+            if not mon.active:
+                self.last_move_dict[self.get_pkmn_battle_id(mon_name)] = 0
+            opponent = battle.opponent_role == mon_name[:2]
+            species = np.array([POKEMONS[mon.species]])  # EMBEDDING
+            ability = np.array([ABILITIES[mon.ability]])  # EMBEDDING
+            item = np.array([ITEMS[mon.item]])  # EMBEDDING
             moves = mon.moves
             pp = np.zeros(12)
-            moves_encoding = np.array(list(moves.keys()))
+            moves_encoding = np.array(list(moves.keys()))  # EMBEDDING
             for i, move in enumerate(moves):
                 pp_bin = self.get_pp_bin(move.current_pp)
                 if pp_bin:
                     pp[pp_bin-(3*i)]
-            last_used_move = np.array([self.last_move_dict[self.get_pkmn_battle_id(mon_name)]])
-            # all'inizio della partita, creare dizionario dei pokémon: chiave come i pokémon in teams,
-            # valore l'ultima mossa utilizzata. Se non c'è, mettere 0. Se c'è, mettere il valore della mossa (numerico)
-            # ogni turno controllare ultima observation e vedere le mosse utilizzate. In base all'utilizzatore,
-            # aggiornare il dizionario accordingly. L'encoding dal dizionario è semplicemente ottenuto 
-            # interrogando il dizionario con l'id pokemon e si prende l'id mossa 
+            last_used_move = np.array([self.last_move_dict[self.get_pkmn_battle_id(mon_name)]])  # EMBEDDING
             
             
             type1 = np.zeros(17)
@@ -239,7 +253,7 @@ class GlorIA(Gen4EnvSinglePlayer):
             # SOPRA AL 5 TOGLI 1, TOTALE 17 TIPI manca fairy (gen6)
             get_type_index = lambda x: x-1 if x > 4 else x
             type1[-get_type_index(mon.type_1.value)]
-            if mon.type_2 is not None:
+            if mon.type_2:
                 type2[-get_type_index(mon.type_2.value)]
             else:
                 type2[0] = 1
@@ -251,7 +265,7 @@ class GlorIA(Gen4EnvSinglePlayer):
                 hp[hp_bin] = 1
 
 
-            boosts_encoding = np.array(84)
+            boosts_encoding: np.array = np.array(84)
             for i, stat in enumerate(mon.boosts):
                 value = mon.boosts[stat]
                 if value > 0:
@@ -260,13 +274,61 @@ class GlorIA(Gen4EnvSinglePlayer):
                     boosts_encoding[value+6+(12*i)]
 
             effects_encoding = np.zeros(19)
+            taunt = np.zeros(5)
+            encore = np.zeros(8)
+            slow_start = np.zeros(5)
+
             for effect in mon.effects:
                 if effect.name in EFFECTS:
                     effects_encoding[EFFECTS[effect.name]] = 1
-            
+                elif effect.name == "TAUNT":
+                    turn = mon.effects[effect]
+                    taunt[-turn] = 1
+                elif effect.name == "ENCORE":
+                    turn = mon.effects[effect]
+                    encore[-turn] = 1
+                elif effect.name == "SLOW_START":
+                    turn = mon.effects[effect]
+                    slow_start[-turn] = 1
+                
+            gender = np.zeros(3)
+            gender[-mon.gender.value] = 1
             trapped = np.array([int(battle.trapped)])
+            status = np.zeros(7)
+            if mon.status:
+                status[-mon.status.value] = 1
             
-            # TODO: effect per outrage, come sa di essere bloccato??? 
+            toxic_counter = np.zeros(15)
+            sleep_counter = np.zeros(4)
+            if mon.status_counter:
+                if mon.status.name == "SLP":
+                    sleep_counter[max(-mon.status_counter, -4)] = 1
+                elif mon.status.name == "TOX":
+                    toxic_counter[max(-mon.status_counter, -15)] = 1
+            
+            weight_encoding = np.zeros(6)
+            weight_encoding[self.get_weight_bin(mon.weight)] = 1
+
+            first_turn = np.array([int(mon.first_turn)])
+
+            protect_counter = np.zeros(5)
+            if mon.protect_counter:
+                protect_counter[-mon.protect_counter] = 1
+            
+            is_mine = np.array([int(not opponent)])
+            must_recharge = np.array([int(mon.must_recharge)])
+            preparing = np.array([int(mon.preparing)])
+            active = np.array([int(mon.active)])
+            unknown = np.zeros(1)
+
+            pokemons_encoding.append(
+                np.concatenate([species, ability, item, moves_encoding, pp, last_used_move, type1, type2, 
+                                hp, boosts_encoding, effects_encoding, taunt, encore, slow_start, gender,
+                                trapped, status, toxic_counter, sleep_counter, weight_encoding, first_turn, protect_counter,
+                                is_mine, must_recharge, preparing, active, unknown])
+            )
+        for i in range(12 - len(pokemons_encoding)):
+            pokemons_encoding.append(np.zeros(336))
             
 
 
