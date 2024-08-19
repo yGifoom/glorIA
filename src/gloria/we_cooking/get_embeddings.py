@@ -260,8 +260,8 @@ class GlorIA(Gen4EnvSinglePlayer):
 
 
             hp = np.zeros(17)
-            if mon.current_hp_fraction:
-                hp_bin = int(mon.current_hp_fraction*100 / 6.25)  # to have 17 bins (16th of health + max) 
+            if mon.current_hp_fraction:,,,
+                hp_bin = -int(mon.current_hp_fraction*100 / 6.25)  # to have 17 bins (16th of health + max) 
                 hp[hp_bin] = 1
 
 
@@ -327,15 +327,62 @@ class GlorIA(Gen4EnvSinglePlayer):
                                 trapped, status, toxic_counter, sleep_counter, weight_encoding, first_turn, protect_counter,
                                 is_mine, must_recharge, preparing, active, unknown])
             )
+        pokemons_encoding = []
+        # Standard pokemon encoding for unknown pokemons
+
         for i in range(12 - len(pokemons_encoding)):
-            pokemons_encoding.append(np.zeros(336))
+            opponent = battle.opponent_role == mon_name[:2]
+            species = np.array([0])  # EMBEDDING
+            ability = np.array([0])  # EMBEDDING
+            item = np.array([0])  # EMBEDDING
+            
+            pp = np.zeros(12)
+            moves_encoding = np.array([0,0,0,0])  # EMBEDDING
+            for i in range(4):
+                pp_bin = self.get_pp_bin(20) # average pp for unknown pp
+                if pp_bin:
+                    pp[pp_bin-(3*i)]
+            last_used_move = np.array([0])  # EMBEDDING
+            
+            
+            type1 = np.zeros(17)
+            type2 = np.zeros(18)  # can be null type
+
+            hp = np.zeros(17)
+            hp[0] = 1 # unknown health is full health
+
+            boosts_encoding: np.array = np.array(84)
+
+            effects_encoding = np.zeros(19)
+            taunt = np.zeros(5)
+            encore = np.zeros(8)
+            slow_start = np.zeros(5)
+                
+            gender = np.zeros(3)
+            trapped = np.array([0])
+            status = np.zeros(7)
+            
+            toxic_counter = np.zeros(15)
+            sleep_counter = np.zeros(4)
+            
+            weight_encoding = np.zeros(6)
+
+            first_turn = np.array([0])
+
+            protect_counter = np.zeros(5)
+            
+            is_mine = np.array([0])
+            must_recharge = np.array([0])
+            preparing = np.array([0])
+            active = np.array([0])
+            unknown = np.array([1])
             
 
 
             
             
+
 
 
 
     
-        
