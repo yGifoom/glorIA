@@ -5,7 +5,9 @@ description = "A pokemon showdown AI using reinforcement learning"
 authors = [
     {name = "yGifoom", email = "giovisano@gmail.com"},
 ]
-dependencies = []
+dependencies = [
+    "poke-env>=0.8.1",
+]
 requires-python = ">=3.10"
 readme = "README.md"
 license = {text = "MIT"}
