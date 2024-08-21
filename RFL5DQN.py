@@ -14,7 +14,6 @@ from poke_env.player import (
     background_cross_evaluate,
     background_evaluate_player,
 )
-from keras.models import load_model
 from tabulate import tabulate
 from poke_env import AccountConfiguration
 from gymnasium.spaces import Space, Box
