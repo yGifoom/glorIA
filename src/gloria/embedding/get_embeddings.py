@@ -5,8 +5,9 @@ from poke_env.environment import Battle, Pokemon, Weather
 from poke_env.player import Gen4EnvSinglePlayer
 import numpy as np
 
+DATA_DIR = "src/gloria/embedding/data/"
 
-with open("gen4randombattle.json", 'r') as f:    
+with open(DATA_DIR + "gen4randombattle.json", 'r') as f:    
     GEN4 = json.load(f)
     print(f"pokemon gen4: {len(GEN4)}")
 
@@ -14,7 +15,7 @@ with open("gen4randombattle.json", 'r') as f:
 
 def get_pokemons(gen):
     pokemons = dict(zip(sorted(map(lambda x: to_id_str(x) ,gen.keys())), [i+1 for i in range(len(gen))]))
-    with open("gen4pokemon.json", "w") as f:
+    with open(DATA_DIR + "gen4pokemon.json", "w") as f:
         json.dump(pokemons, f)
     return pokemons
 
@@ -25,7 +26,7 @@ def count_abilities(gen):
         for ability in gen[mon]["abilities"]:
             abilities.add(to_id_str(ability))
     sorted_abilities = dict(zip(sorted(abilities), [i+1 for i in range(len(abilities))]))
-    with open("gen4abilities.json", "w") as f:
+    with open(DATA_DIR + "gen4abilities.json", "w") as f:
         json.dump(sorted_abilities, f)
     return sorted_abilities
 
@@ -35,7 +36,7 @@ def count_items(gen):
         for item in gen[mon]["items"]:
             items.add(to_id_str(item))
     sorted_items = dict(zip(sorted(items), [i+1 for i in range(len(items))]))
-    with open("gen4items.json", "w") as f:
+    with open(DATA_DIR + "gen4items.json", "w") as f:
         json.dump(sorted_items, f)
     return sorted_items
 
@@ -47,7 +48,7 @@ def count_moves(gen):
                 moves.add(to_id_str(move))
     moves.add("hiddenpower")
     sorted_moves = dict(zip(sorted(moves), [i+1 for i in range(len(moves))]))
-    with open("gen4moves.json", "w") as f:
+    with open(DATA_DIR + "gen4moves.json", "w") as f:
         json.dump(sorted_moves, f)
     return sorted_moves
 
@@ -107,15 +108,15 @@ def get_unknown_pokemon():
 UNKNOWN_POKEMON = get_unknown_pokemon()
 
 # Load dicts for encoding
-with open("gen4abilities.json", "r") as f:
+with open(DATA_DIR + "gen4abilities.json", "r") as f:
     ABILITIES = json.load(f)
-with open("gen4items.json", "r") as f:
+with open(DATA_DIR + "gen4items.json", "r") as f:
     ITEMS = json.load(f)
-with open("gen4moves.json", "r") as f:
+with open(DATA_DIR + "gen4moves.json", "r") as f:
     MOVES = json.load(f)
-with open("gen4pokemon.json", "r") as f:
+with open(DATA_DIR + "gen4pokemon.json", "r") as f:
     POKEMONS = json.load(f)
-with open("gen4effects.json", "r") as f:
+with open(DATA_DIR + "gen4effects.json", "r") as f:
     EFFECTS = json.load(f)
 
 

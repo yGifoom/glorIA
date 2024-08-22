@@ -3,7 +3,7 @@ from poke_env.data import GenData
 from poke_env.player.battle_order import ForfeitBattleOrder
 from poke_env.environment.effect import Effect
 from poke_env.data.normalize import to_id_str
-from src.gloria.we_cooking.get_embeddings import GlorIA  # THIS IMPORT IS BROKEN! TRY TO DO WEIRD STUFF TO MAKE IT WORK
+from src.gloria.embedding.get_embeddings import GlorIA 
 import asyncio
 import json
 
