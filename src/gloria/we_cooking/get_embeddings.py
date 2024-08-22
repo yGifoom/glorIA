@@ -45,6 +45,7 @@ def count_moves(gen):
         for role in gen[mon]["roles"]:
             for move in gen[mon]["roles"][role]["moves"]:
                 moves.add(to_id_str(move))
+    moves.add("hiddenpower")
     sorted_moves = dict(zip(sorted(moves), [i+1 for i in range(len(moves))]))
     with open("gen4moves.json", "w") as f:
         json.dump(sorted_moves, f)
@@ -56,6 +57,54 @@ def count_moves(gen):
 pokemons = get_pokemons(GEN4)
 # when we get types during battle, subtract 1 if the value is greater than 4 since fairy is not in gen4
 
+
+def get_unknown_pokemon():
+    species = np.array([0])  # EMBEDDING
+    ability = np.array([0])  # EMBEDDING
+    item = np.array([0])  # EMBEDDING
+    
+    pp = np.zeros(16)
+    moves_encoding = np.array([0,0,0,0])  # EMBEDDING
+    last_used_move = np.array([0])  # EMBEDDING
+    
+    
+    type1 = np.zeros(17)
+    type2 = np.zeros(18)  # can be null type
+
+    hp = np.zeros(17)
+    hp[0] = 1 # unknown health is full health
+
+    boosts_encoding = np.zeros(84)
+
+    effects_encoding = np.zeros(19)
+    taunt = np.zeros(5)
+    encore = np.zeros(8)
+    slow_start = np.zeros(5)
+        
+    gender = np.zeros(3)
+    trapped = np.array([0])
+    status = np.zeros(7)
+    
+    toxic_counter = np.zeros(15)
+    sleep_counter = np.zeros(4)
+    
+    weight_encoding = np.zeros(6)
+
+    first_turn = np.zeros([0])
+
+    protect_counter = np.zeros(5)
+    
+    is_mine = np.array([0])
+    must_recharge = np.array([0])
+    preparing = np.array([0])
+    active = np.array([0])
+    unknown = np.array([1])
+    return np.concatenate([species, ability, item, moves_encoding, pp, last_used_move, type1, type2, 
+                        hp, boosts_encoding, effects_encoding, taunt, encore, slow_start, gender,
+                        trapped, status, toxic_counter, sleep_counter, weight_encoding, first_turn, protect_counter,
+                        is_mine, must_recharge, preparing, active, unknown], dtype=np.float32)
+
+UNKNOWN_POKEMON = get_unknown_pokemon()
 
 # Load dicts for encoding
 with open("gen4abilities.json", "r") as f:
@@ -69,6 +118,8 @@ with open("gen4pokemon.json", "r") as f:
 with open("gen4effects.json", "r") as f:
     EFFECTS = json.load(f)
 
+
+
 # weather = {"HAIL": np.zeros(9),
 #            "RAINDANCE": np.zeros(9),
 #            "SANDSTORM": np.zeros(9)} 
@@ -77,7 +128,11 @@ with open("gen4effects.json", "r") as f:
 
 
 
-class GlorIA(Gen4EnvSinglePlayer):
+class GlorIA():  # not inhereting from Gen4EnvSinglePlayer temorarily to test the embed_battle method
+    def test_embedding(self, battle: Battle):
+        arr = self.embed_battle(battle).tolist()
+        return arr
+
     def get_pkmn_battle_id(self, pkmn_id):
         return f"{pkmn_id[:2]}a{pkmn_id[2:]}"
 
@@ -88,12 +143,11 @@ class GlorIA(Gen4EnvSinglePlayer):
         """
         turn = battle.turn
         if turn == 1:  # initializing last used move dict
-            self.last_move_dict = {self.get_pkmn_battle_id(pkmn_id): 0 for pkmn_id in battle.team | battle.opponent_team}
-        if battle.turn > 1:
-            self.update_last_used_move(battle.observations[battle.turn - 1].events)  # TODO: CONTROLLARE SE è TURN-1 O TURN
+            self.last_move_dict = {}
+        self.update_last_used_move(battle.observations[battle.turn - 1].events)  # TODO: CONTROLLARE SE è TURN-1 O TURN
         hail, rain, sandstorm, sun = self.get_weather(battle)
+        t_room = np.zeros(5)
         if battle.fields:
-            t_room = np.zeros(5)
             start_turn = battle.fields.get("trickroom", 0)
             if start_turn:
                 index = min(start_turn - turn, -1)
@@ -102,13 +156,16 @@ class GlorIA(Gen4EnvSinglePlayer):
         n_unknown = np.zeros(6)
         n_unknown[-len(battle.opponent_team)] = 1
         lightscreen, reflect, safeguard, spikes, stealth_rocks, toxic_spikes = self.get_side_conditions(battle)  
-    
+        pokemons_to_encode = self.encode_pokemons(battle)
+        return np.concatenate([sun, rain, hail, sandstorm, t_room, force_switch, n_unknown, 
+                               stealth_rocks, spikes, toxic_spikes, reflect, lightscreen, safeguard,
+                               pokemons_to_encode])
 
     def get_weather(self, battle: Battle):
         turn = battle.turn
         sun = rain = hail = sandstorm = np.zeros(9)
         if battle.weather:
-            weather, starting_turn = [*battle.weather.items()]
+            weather, starting_turn = next(iter(battle.weather.items()))
             weather = weather.name
             index = min(-min(turn - starting_turn, 9), -1)
             me, opponent = battle.all_active_pokemons
@@ -208,7 +265,7 @@ class GlorIA(Gen4EnvSinglePlayer):
                 move_id = MOVES[to_id_str(event[3])]
                 self.last_move_dict[pkmn_id] = move_id
                 assert len(self.last_move_dict) < 12, \
-                    f"Il dizionario delle last used move ha ecceduto il 
+                    f"Il dizionario delle last used move ha ecceduto il \
                     numero di pokémon totali \n\n{self.last_move_dict}"
             
     
@@ -227,25 +284,28 @@ class GlorIA(Gen4EnvSinglePlayer):
             return -6
 
 
-    def get_pokemons(self, battle: Battle):
+    def encode_pokemons(self, battle: Battle):
         pokemons_encoding = []
-        all_mons = battle.team() | battle.opponent_team()
+        all_mons = battle.team | battle.opponent_team
         for mon_name in all_mons:
             mon: Pokemon = all_mons[mon_name]
             if not mon.active:
                 self.last_move_dict[self.get_pkmn_battle_id(mon_name)] = 0
             opponent = battle.opponent_role == mon_name[:2]
             species = np.array([POKEMONS[mon.species]])  # EMBEDDING
-            ability = np.array([ABILITIES[mon.ability]])  # EMBEDDING
-            item = np.array([ITEMS[mon.item]])  # EMBEDDING
+            ability = np.array([ABILITIES[mon.ability] if mon.ability else 0])  # EMBEDDING
+            if mon.item:
+                item_number = ITEMS[mon.item] if mon.item != "unknown_item" else 0
+            else:
+                item_number = len(ITEMS) + 1
+            item = np.array([item_number])  # EMBEDDING
             moves = mon.moves
-            pp = np.zeros(12)
-            moves_encoding = np.array(list(moves.keys()))  # EMBEDDING
+            pp = np.zeros(16)
+            moves_encoding = np.array(list(map(lambda x: MOVES[x], moves.keys())))  # EMBEDDING
             for i, move in enumerate(moves):
-                pp_bin = self.get_pp_bin(move.current_pp)
-                if pp_bin:
-                    pp[pp_bin-(3*i)]
-            last_used_move = np.array([self.last_move_dict[self.get_pkmn_battle_id(mon_name)]])  # EMBEDDING
+                pp_bin = self.get_pp_bin(moves[move].current_pp)
+                pp[pp_bin-(3*i)]
+            last_used_move = np.array([self.last_move_dict.get(self.get_pkmn_battle_id(mon_name), 0)])  # EMBEDDING
             
             
             type1 = np.zeros(17)
@@ -260,12 +320,12 @@ class GlorIA(Gen4EnvSinglePlayer):
 
 
             hp = np.zeros(17)
-            if mon.current_hp_fraction:,,,
+            if mon.current_hp_fraction:
                 hp_bin = -int(mon.current_hp_fraction*100 / 6.25)  # to have 17 bins (16th of health + max) 
                 hp[hp_bin] = 1
 
 
-            boosts_encoding: np.array = np.array(84)
+            boosts_encoding = np.zeros(84)
             for i, stat in enumerate(mon.boosts):
                 value = mon.boosts[stat]
                 if value > 0:
@@ -325,57 +385,16 @@ class GlorIA(Gen4EnvSinglePlayer):
                 np.concatenate([species, ability, item, moves_encoding, pp, last_used_move, type1, type2, 
                                 hp, boosts_encoding, effects_encoding, taunt, encore, slow_start, gender,
                                 trapped, status, toxic_counter, sleep_counter, weight_encoding, first_turn, protect_counter,
-                                is_mine, must_recharge, preparing, active, unknown])
+                                is_mine, must_recharge, preparing, active, unknown], dtype=np.float32)
             )
-        pokemons_encoding = []
+        
         # Standard pokemon encoding for unknown pokemons
-
         for i in range(12 - len(pokemons_encoding)):
-            opponent = battle.opponent_role == mon_name[:2]
-            species = np.array([0])  # EMBEDDING
-            ability = np.array([0])  # EMBEDDING
-            item = np.array([0])  # EMBEDDING
-            
-            pp = np.zeros(12)
-            moves_encoding = np.array([0,0,0,0])  # EMBEDDING
-            for i in range(4):
-                pp_bin = self.get_pp_bin(20) # average pp for unknown pp
-                if pp_bin:
-                    pp[pp_bin-(3*i)]
-            last_used_move = np.array([0])  # EMBEDDING
-            
-            
-            type1 = np.zeros(17)
-            type2 = np.zeros(18)  # can be null type
+            pokemons_encoding.append(UNKNOWN_POKEMON)  # all unknown pokemons are the same
 
-            hp = np.zeros(17)
-            hp[0] = 1 # unknown health is full health
-
-            boosts_encoding: np.array = np.array(84)
-
-            effects_encoding = np.zeros(19)
-            taunt = np.zeros(5)
-            encore = np.zeros(8)
-            slow_start = np.zeros(5)
-                
-            gender = np.zeros(3)
-            trapped = np.array([0])
-            status = np.zeros(7)
+        return np.concatenate(pokemons_encoding, dtype=np.float32)
+        
             
-            toxic_counter = np.zeros(15)
-            sleep_counter = np.zeros(4)
-            
-            weight_encoding = np.zeros(6)
-
-            first_turn = np.array([0])
-
-            protect_counter = np.zeros(5)
-            
-            is_mine = np.array([0])
-            must_recharge = np.array([0])
-            preparing = np.array([0])
-            active = np.array([0])
-            unknown = np.array([1])
             
 
 
