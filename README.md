@@ -73,6 +73,11 @@ UNKNOWN (1)
 
 bibliography:
 
+### DEV NOTES
+It is required that you install the [Pokemon showdown](https://github.com/smogon/pokemon-showdown)local server for testing,
+repo is included in submodules by default, a small script runs the server.
+(note that repo requires a version of nodejs, install it globally i can't be bothered!)
+
 
 
 

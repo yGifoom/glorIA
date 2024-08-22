@@ -46,15 +46,17 @@ def count_moves(gen):
         for role in gen[mon]["roles"]:
             for move in gen[mon]["roles"][role]["moves"]:
                 moves.add(to_id_str(move))
+    moves.add("struggle")
     moves.add("hiddenpower")
     sorted_moves = dict(zip(sorted(moves), [i+1 for i in range(len(moves))]))
+    
     with open(DATA_DIR + "gen4moves.json", "w") as f:
         json.dump(sorted_moves, f)
     return sorted_moves
 
-# abilities = count_abilities(GEN4)
-# items = count_items(GEN4)
-# moves = count_moves(GEN4)
+abilities = count_abilities(GEN4)
+items = count_items(GEN4)
+moves = count_moves(GEN4)
 pokemons = get_pokemons(GEN4)
 # when we get types during battle, subtract 1 if the value is greater than 4 since fairy is not in gen4
 
@@ -265,7 +267,7 @@ class GlorIA():  # not inhereting from Gen4EnvSinglePlayer temorarily to test th
                 pkmn_id = event[2]
                 move_id = MOVES[to_id_str(event[3])]
                 self.last_move_dict[pkmn_id] = move_id
-                assert len(self.last_move_dict) < 12, \
+                assert len(self.last_move_dict) <= 12, \
                     f"Il dizionario delle last used move ha ecceduto il \
                     numero di pokémon totali \n\n{self.last_move_dict}"
             
@@ -293,7 +295,15 @@ class GlorIA():  # not inhereting from Gen4EnvSinglePlayer temorarily to test th
             if not mon.active:
                 self.last_move_dict[self.get_pkmn_battle_id(mon_name)] = 0
             opponent = battle.opponent_role == mon_name[:2]
-            species = np.array([POKEMONS[mon.species]])  # EMBEDDING
+            
+            # handling for letters of uknown
+            species = mon.species
+            for s in ["unown", "gastrodon"]:
+                if s in species:
+                    species = s
+                    break
+                
+            species = np.array([POKEMONS[species]])  # EMBEDDING
             ability = np.array([ABILITIES[mon.ability] if mon.ability else 0])  # EMBEDDING
             if mon.item:
                 item_number = ITEMS[mon.item] if mon.item != "unknown_item" else 0
@@ -362,10 +372,11 @@ class GlorIA():  # not inhereting from Gen4EnvSinglePlayer temorarily to test th
             toxic_counter = np.zeros(15)
             sleep_counter = np.zeros(4)
             if mon.status_counter:
-                if mon.status.name == "SLP":
-                    sleep_counter[max(-mon.status_counter, -4)] = 1
-                elif mon.status.name == "TOX":
-                    toxic_counter[max(-mon.status_counter, -15)] = 1
+                if mon.status:
+                    if mon.status.name == "SLP":
+                        sleep_counter[max(-mon.status_counter, -4)] = 1
+                    elif mon.status.name == "TOX":
+                        toxic_counter[max(-mon.status_counter, -15)] = 1
             
             weight_encoding = np.zeros(6)
             weight_encoding[self.get_weight_bin(mon.weight)] = 1
@@ -391,7 +402,7 @@ class GlorIA():  # not inhereting from Gen4EnvSinglePlayer temorarily to test th
         
         # Standard pokemon encoding for unknown pokemons
         for i in range(12 - len(pokemons_encoding)):
-            pokemons_encoding.append(UNKNOWN_POKEMON)  # all unknown pokemons are the same
+            pokemons_encoding.append(UNKNOWN_POKEMON.copy())  # all unknown pokemons are the same
 
         return np.concatenate(pokemons_encoding, dtype=np.float32)
         

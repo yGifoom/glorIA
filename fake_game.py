@@ -29,9 +29,11 @@ class DebugRandomPlayer(RandomPlayer):
         # check if u-turn or volt switch is used:
         # if battle.force_switch and not (battle.active_pokemon.fainted or battle.opponent_active_pokemon.fainted):
         #     pass
-        
-        EMBED_JSON[battle.turn] = PLAYER.test_embedding(battle)
-
+        try:
+            EMBED_JSON[battle.turn] = PLAYER.test_embedding(battle)
+        except Exception:
+            with open("check_encoding.json", "w") as f:  # encoding data for a problematic battle
+                json.dump(EMBED_JSON, f)
         # if battle.turn == 6:
         #     with open("check_encoding.json", "w") as f:
         #         json.dump(EMBED_JSON, f)
@@ -46,21 +48,21 @@ class DebugRandomPlayer(RandomPlayer):
         #         pass
         ARR.append(battle)
         return self.choose_random_move(battle)
-
-random_player = RandomPlayer(battle_format="gen4randombattle")
+    
+random_player = DebugRandomPlayer(battle_format="gen4randombattle")
 second_random_player = DebugRandomPlayer(battle_format="gen4randombattle")
 
 # The battle_against method initiates a battle between two players.
 # Here we are using asynchronous programming (await) to start the battle.
 async def test():
     global color_change
-    # for i in range(100):
-    await random_player.battle_against(second_random_player, n_battles=1)
-    # print(f"battle {i}")
-    with open("check_encoding.json", "w") as f:  # encoding data for one battle. MISSING EMBEDDING
-        json.dump(EMBED_JSON, f)
+    for i in range(10000):
+        await random_player.battle_against(second_random_player, n_battles=1)
+        print(f"battle {i}")
+        
     
-asyncio.run(test())  # RUNNING THIS METHOD WILL SAVE THE EMBEDDING DATA FOR ONE BATTLE
+for i in range(1):
+    asyncio.run(test())  # RUNNING THIS METHOD WILL SAVE THE EMBEDDING DATA FOR ONE BATTLE at a time
 
 print("Fine.")
 # with open("pokedex.json", "w") as f:
