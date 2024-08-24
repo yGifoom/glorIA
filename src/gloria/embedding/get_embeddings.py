@@ -10,7 +10,7 @@ DATA_DIR = "src/gloria/embedding/data/"
 
 with open(DATA_DIR + "gen4randombattle.json", 'r') as f:    
     GEN4 = json.load(f)
-    print(f"pokemon gen4: {len(GEN4)}")
+    #print(f"pokemon gen4: {len(GEN4)}")
 
 
 def get_pokemons(gen):
