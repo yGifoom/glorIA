@@ -73,6 +73,11 @@ UNKNOWN (1)
 
 bibliography:
 
+## MONTECARLO
+- we will not try to find equal states throughout the montecarlo tree search
+simply because of the extremely high branching factor
+
+
 ### DEV NOTES
 It is required that you install the [Pokemon showdown](https://github.com/smogon/pokemon-showdown)local server for testing,
 repo is included in submodules by default, a small script runs the server.
