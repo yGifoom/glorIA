@@ -4,13 +4,13 @@ from poke_env.data.normalize import to_id_str
 from poke_env.environment import Battle, Pokemon, Weather
 from poke_env.player import Gen4EnvSinglePlayer
 import numpy as np
+from gymnasium.spaces import Box
 
 DATA_DIR = "src/gloria/embedding/data/"
 
 with open(DATA_DIR + "gen4randombattle.json", 'r') as f:    
     GEN4 = json.load(f)
-    print(f"pokemon gen4: {len(GEN4)}")
-
+    #print(f"pokemon gen4: {len(GEN4)}")
 
 
 def get_pokemons(gen):
@@ -18,7 +18,6 @@ def get_pokemons(gen):
     with open(DATA_DIR + "gen4pokemon.json", "w") as f:
         json.dump(pokemons, f)
     return pokemons
-
 
 def count_abilities(gen):
     abilities = set()
@@ -54,10 +53,11 @@ def count_moves(gen):
         json.dump(sorted_moves, f)
     return sorted_moves
 
-abilities = count_abilities(GEN4)
-items = count_items(GEN4)
-moves = count_moves(GEN4)
-pokemons = get_pokemons(GEN4)
+
+# count_abilities(GEN4)
+# count_items(GEN4)
+# count_moves(GEN4)
+# get_pokemons(GEN4)
 # when we get types during battle, subtract 1 if the value is greater than 4 since fairy is not in gen4
 
 
@@ -93,7 +93,7 @@ def get_unknown_pokemon():
     
     weight_encoding = np.zeros(6)
 
-    first_turn = np.zeros([0])
+    first_turn = np.zeros(1)
 
     protect_counter = np.zeros(5)
     
@@ -102,11 +102,28 @@ def get_unknown_pokemon():
     preparing = np.array([0])
     active = np.array([0])
     unknown = np.array([1])
-    return np.concatenate([species, ability, item, moves_encoding, pp, last_used_move, type1, type2, 
+    return_vector = np.concatenate([
+                        species, ability, item, moves_encoding, last_used_move, pp, type1, type2, 
                         hp, boosts_encoding, effects_encoding, taunt, encore, slow_start, gender,
                         trapped, status, toxic_counter, sleep_counter, weight_encoding, first_turn, protect_counter,
                         is_mine, must_recharge, preparing, active, unknown], dtype=np.float32)
+    return return_vector
 
+
+def get_bounds():
+    N = 896  # N is number of embedding dimensions
+    EMBEDDED_VECTOR_MIN = [float("-inf")]*N # we still don't know the upper and lower bounds
+    EMBEDDED_VECTOR_MAX = [float("inf")]*N # we still don't know the upper and lower bounds
+    low = np.concatenate([np.zeros(106),
+                            [*EMBEDDED_VECTOR_MIN, *np.zeros(235)]*12
+                            ])
+
+    high = np.concatenate([np.ones(106),
+            [*EMBEDDED_VECTOR_MAX, *np.ones(235)]*12
+            ])
+    return Box(low, high, dtype=np.float32)
+
+DESCRIBED_EMBEDDING = get_bounds()
 UNKNOWN_POKEMON = get_unknown_pokemon()
 
 # Load dicts for encoding
@@ -131,13 +148,25 @@ with open(DATA_DIR + "gen4effects.json", "r") as f:
 
 
 
-class GlorIA():  # not inhereting from Gen4EnvSinglePlayer temorarily to test the embed_battle method
+class GlorIA(Gen4EnvSinglePlayer):  # not inhereting from Gen4EnvSinglePlayer temorarily to test the embed_battle method
     def test_embedding(self, battle: Battle):
         arr = self.embed_battle(battle).tolist()
         return arr
 
     def get_pkmn_battle_id(self, pkmn_id):
         return f"{pkmn_id[:2]}a{pkmn_id[2:]}"
+
+
+    def decode_battle_vector(self, vector: np.ndarray):
+        pass
+    
+    def calc_reward(self, last_battle, current_battle) -> float:
+        return self.reward_computing_helper(
+            current_battle, victory_value=1.0
+        )
+
+    def describe_embedding(self):
+        return DESCRIBED_EMBEDDING
 
 
     def embed_battle(self, battle: Battle):
@@ -160,9 +189,12 @@ class GlorIA():  # not inhereting from Gen4EnvSinglePlayer temorarily to test th
         n_unknown[-len(battle.opponent_team)] = 1
         lightscreen, reflect, safeguard, spikes, stealth_rocks, toxic_spikes = self.get_side_conditions(battle)  
         pokemons_to_encode = self.encode_pokemons(battle)
-        return np.concatenate([sun, rain, hail, sandstorm, t_room, force_switch, n_unknown, 
+        return_vector = np.concatenate([sun, rain, hail, sandstorm, t_room, force_switch, n_unknown, 
                                stealth_rocks, spikes, toxic_spikes, reflect, lightscreen, safeguard,
-                               pokemons_to_encode])
+                               pokemons_to_encode
+                               ])
+        return return_vector
+
 
     def get_weather(self, battle: Battle):
         turn = battle.turn
@@ -298,7 +330,7 @@ class GlorIA():  # not inhereting from Gen4EnvSinglePlayer temorarily to test th
             
             # handling for letters of uknown
             species = mon.species
-            for s in ["unown", "gastrodon"]:
+            for s in ("unown", "gastrodon"):
                 if s in species:
                     species = s
                     break
@@ -312,7 +344,7 @@ class GlorIA():  # not inhereting from Gen4EnvSinglePlayer temorarily to test th
             item = np.array([item_number])  # EMBEDDING
             moves = mon.moves
             pp = np.zeros(16)
-            moves_encoding = np.array(list(map(lambda x: MOVES[x], moves.keys())))  # EMBEDDING
+            moves_encoding = np.array(list(map(lambda x: MOVES[x], moves.keys())) + [0]*(4 - len(moves)))  # EMBEDDING
             for i, move in enumerate(moves):
                 pp_bin = self.get_pp_bin(moves[move].current_pp)
                 pp[pp_bin-(3*i)]
@@ -391,10 +423,9 @@ class GlorIA():  # not inhereting from Gen4EnvSinglePlayer temorarily to test th
             must_recharge = np.array([int(mon.must_recharge)])
             preparing = np.array([int(mon.preparing)])
             active = np.array([int(mon.active)])
-            unknown = np.zeros(1)
-
+            unknown = np.array([0])
             pokemons_encoding.append(
-                np.concatenate([species, ability, item, moves_encoding, pp, last_used_move, type1, type2, 
+                np.concatenate([species, ability, item, moves_encoding, last_used_move, pp, type1, type2, 
                                 hp, boosts_encoding, effects_encoding, taunt, encore, slow_start, gender,
                                 trapped, status, toxic_counter, sleep_counter, weight_encoding, first_turn, protect_counter,
                                 is_mine, must_recharge, preparing, active, unknown], dtype=np.float32)
@@ -402,8 +433,8 @@ class GlorIA():  # not inhereting from Gen4EnvSinglePlayer temorarily to test th
         
         # Standard pokemon encoding for unknown pokemons
         for i in range(12 - len(pokemons_encoding)):
-            pokemons_encoding.append(UNKNOWN_POKEMON.copy())  # all unknown pokemons are the same
-
+            pokemons_encoding.append(UNKNOWN_POKEMON)  # all unknown pokemons are the same
+        
         return np.concatenate(pokemons_encoding, dtype=np.float32)
         
             

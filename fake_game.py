@@ -29,12 +29,15 @@ class DebugRandomPlayer(RandomPlayer):
         # check if u-turn or volt switch is used:
         # if battle.force_switch and not (battle.active_pokemon.fainted or battle.opponent_active_pokemon.fainted):
         #     pass
+        
         try:
             EMBED_JSON[battle.turn] = PLAYER.test_embedding(battle)
         except Exception:
             print(f"Exception {Exception} occurred, saving log")
             with open("check_encoding.json", "a") as f:  # encoding data for a problematic battle
                 json.dump(EMBED_JSON, f)
+        # PLAYER.test_embedding(battle)
+
         # if battle.turn == 6:
         #     with open("check_encoding.json", "w") as f:
         #         json.dump(EMBED_JSON, f)
