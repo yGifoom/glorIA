@@ -8,6 +8,7 @@ authors = [
 dependencies = [
     "poke-env>=0.8.1",
     "asyncio>=3.4.3",
+    "black>=24.8.0",
 ]
 requires-python = ">=3.10"
 readme = "README.md"
