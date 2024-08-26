@@ -1,20 +1,23 @@
 import numpy as np
-from poke_env.environment import Battle
-from gloria.embedding.get_embeddings import MOVES, POKEMONS
-
+from poke_env.environment import Battle, observation
+from gloria.embedding.get_embeddings import MOVES, POKEMONS, GlorIA
+from gloria.MCTS.simulator import Simulator
 # MISSING FUNCTION AND IMPORTS:
-def model(state, action): 
+n_options = 5 #len(POKEMONS) + len(MOVES)
+
+def model(state): 
     '''
-    probability of the model choosing an action (everything is masked except that action)
+    probability of the model choosing any action (everything is masked except that action)
     in a state
     '''
-    return 0.1
+    res = [0.1]*n_options
+
+    return res
 
 def can_moves(state):
     '''
     calculate all the available actions from a given state
     '''
-    n_options = len(POKEMONS) + len(MOVES)
 
     if np.random.randint(0, 100) == 0:
         res =  np.zeros(n_options)
@@ -23,10 +26,22 @@ def can_moves(state):
     
     return res
 
+def critic_head(state):
+    '''
+    evaluates how good a state is
+    '''
+    res = np.count_nonzero([1,1,0,0,0])/n_options
+    return res
+
 # ASSUMPTION: available actions should be a np array of 1s and 0s masking all possible moves 
 # and pokemon to switch out to:
 # [pokemon switch, moves]
 # since POKEMON is 296 long and MOVES is 188, available actions are 484
+
+# HYPERPARAMETERS
+beta = 0.5 # between 0-1 
+alpha = 0.1 # between 0-1 
+#
 
 
 class Node():
@@ -35,33 +50,28 @@ class Node():
         Nodes should initialize all their values and of their corresponding
         actions and then be updated at every rollout
         '''
-        self.state: np.array = s # encoded state
-        self.visited = 1 # times this node was visited during rollouts
+        self.state: Battle = s # battle state
+        self.M = 0 # times this node was visited during rollouts
         available_actions = can_moves(s)
         self.isterminal = True if np.count_nonzero(available_actions) > 0 else False # is leaf or terminal?
         self.actions: np.array = self._encode_actions(available_actions) # actions available from state s
 
-        self.ucb: np.array = self._upper_confidence_bound(a)
-
-    def update(self, v):
+    def update(self, action, v):
         '''
         update value of the node during backpropagation
         '''
-        raise NotImplementedError
-    
-    def simulate(self):
-        '''
-        use the learned model to simulate opponent's moves
-        '''
-        raise NotImplementedError
-        
-    def _upper_confidence_bound(self, a):
-        ucb = a.P**self.beta * (self.visited**1/2) / ((a.N) + 1)
+        action.U = action.P ** beta * ((self.M)**(1/2))/(action.N + 1)
+        action.Q = (action.N * action.Q + v) / (action.N + 1)
+        action.N = (action.N + 1)
+        self.M = self.M + 1
     
     def _encode_actions(self, available_actions: np.array):
+        prob_for_actions: list[float] = model(self.state)
         for i in range(len(available_actions)):
             if available_actions[i] == 1:
-                available_actions[i] = action(i) 
+                available_actions[i] = action(i, prob_for_actions[i]) 
+
+        return np.array(available_actions)
 
 
     
@@ -70,87 +80,115 @@ class Node():
         return res
 
     def __hash__(self):
-        raise NotImplementedError
-         
 
+        obs = np.array(map(lambda x: x.events, self.state.observations.values())).flatten()
+
+        to_encode = tuple(obs)
+
+        hash(to_encode)
+        """
+        tuple(self.state.available_moves), 
+        tuple(self.state.available_switches),
+        tuple(self.state.force_switch),
+        tuple(self.state.fields),
+        tuple(self.state.finished),
+        tuple(self.state.won),
+        tuple(map(str, self.state.weather.keys())), 
+        tuple(self.state.weather.values()),
+        tuple(self.state.trapped),
+        tuple(self.state.maybe_trapped),
+
+
+        tuple(map(str, self.state.opponent_side_conditions.keys())), # to get the names of side conditions #are they all initialized at 0? i don't think so
+        tuple(self.state.opponent_side_conditions.values()),
+        tuple(self.state.opponent_team.values()),
+        tuple(map(str,self.state.opponent_active_pokemon)),
+        
+        tuple(map(str, self.state.side_conditions.keys())), 
+        tuple(self.state.side_conditions.values()),
+        tuple(self.state.team.values),
+        tuple(map(str, self.state.active_pokemon)),"""
+         
 class action:
-    def __init__(self, available_action: int):
+    def __init__(self, available_action: int, P: float):
         # available_action is just the index of the only 1
-        self.a = self._decode_action(available_action)
+        self.a = available_action
 
         self.Q = 0 # reward for action
         # probability of taking this action, 
         # available action is all the actions masked minus one
-        self.P = model(available_action) 
-        self.N = 1 # times action was taken
+        self.P = P # probability of the model taking this action
+        self.N = 0 # times action was taken
         self.U = 0 # upper confidence bound for this action
 
-    def _decode_action(self, action):
-        raise NotImplementedError
-
     def __hash__(self):
-        raise NotImplementedError
+        return hash(self.a, self.Q,  self.P, self.N, self.U)
 
 class MCTS():
-    def __init__(self, state: np.array, available_actions: np.array, alpha=0.1, beta=0.5):
-        # HYPERPARAMETERS
-        self.beta = beta # between 0-1 
-        self.alpha = alpha # between 0-1 
-        #
-
+    def __init__(self, state: Battle):
+       
         # TODO: translate available_actions so that it is a dictionary? 
         # parsing trough the array each time might be too time consuming
+        self.simulator = Simulator()
         self.root = Node(state)
-        self.children: dict = {state: None}
+        self.children: dict = {self.root: None}
 
 
     def rollout(self):
         path = self._choose(self.root) # find path to a leaf/terminal node
         leaf = path[-1] 
-        self._backpropagate(path, self._evaluate(leaf.s))
+        self._backpropagate(path, critic_head(leaf.s))
 
-    def new_root(self, state):
+    def act(self):
         '''
-        once rollouts are done pick the new starting point, pruning all unnecessary
-        nodes
+        once rollouts are done return the best action to take, and wait for the next
+        battlestate
         '''
-        raise NotImplementedError
+        action = np.argmax(np.array(map(lambda x: x.N, self.root.actions)))
+        return self.simulator.decode_action(action.a) # the decoded action to take, DEPENDS ON THE IMPLEMENTATION OF HOW GLORIA WILL TAKE ACTIONS
+
+    def new_root(self, state: Battle):
+
+        old_root = self.root
+
+        new_root_idx = self.root.state == np.array(map(lambda x: x.state, self.children[self.root]))
+        if not np.count_nonzero(new_root_idx): 
+            # somehow we did not see this state previously, create new tree
+            self.root = Node(state)
+        else:
+            self.root = self.children[self.root][np.argmax(new_root_idx)]
+
+        self.children.pop(old_root) 
+            
     
     def _backpropagate(self, path: list[Node], v):
-        for n in path:
-            n.update(v)
+        for node, action in path:
+            node.update(action, v)
 
-    def _choose(self, node: Node):
+    def _choose(self, node: Node) -> list:
         '''
         find the path from root to leaf/terminal node
         return the list of the path
         '''
         path = list()
         while True:
-            expand_action = np.argmax(map(lambda x: 0 if x == 0 else x.U, node.actions)) # array is either 0 or action object
-            path.append(node, expand_action)
+            expand_action: int = np.argmax(map(lambda x: 0 if x == 0 else x.U, node.actions)) # array is either 0 or action object
+            path.append(node, node[expand_action])
             
-            next_state = node.simulate(expand_action)
+            next_state = self.simulator(node.state, expand_action) # expand action is an index of the move
 
-            if next_state not in map(lambda x: x.state, self.children[node]): 
+            states_found = next_state == np.array(map(lambda x: x.state, self.children[node]))
+            if not np.count_nonzero(states_found): 
                 # means that we never visited this state
-                self.children[node] = {expand_action: next_state}
+                if not self.children[node]:
+                    self.children[node] = [next_state]
+                else:
+                    self.children[node].append(next_state)
+                    
                 node = Node(next_state)
                 break
-            node = self._ucb_select(node)
-        
-    def _ucb_select(self, node):
-        '''
-        select next node by their reward
-        '''
-        raise NotImplementedError
-    
-    def _evaluate(self, state: np.array):
-        '''
-        evaluate the reward for having reached a state
-        '''
-        raise NotImplementedError
-
+            node = self.children[node][np.argmin(states_found)] # if we have it in the children we expand it and go on
+        return path
 
 
 
