@@ -38,9 +38,7 @@ class SimpleRLPlayer(Gen4EnvSinglePlayer):
 class Opponent(Player):
     def embed_battle(self, battle: AbstractBattle) -> ObsType:
         return get_embeddings.GlorIA().embed_battle(battle)
-    def choose_move(
-        self, battle: AbstractBattle
-    ) -> Union[BattleOrder, Awaitable[BattleOrder]]:
+    def choose_move(self, battle: AbstractBattle):
         st = self.embed_battle(battle)
         st = np.reshape(st, [1, agent.input_shape])
         return train_env.action_to_move(action=agent.act(st), battle=battle)
@@ -138,12 +136,12 @@ class PPOAgent:
         self.actor.save_weights(name + "_actor")
         self.critic.save_weights(name + "_critic")
 
-config1, config2 = AccountConfiguration("GG", None), AccountConfiguration("Player2", None)
+config1, config2 = AccountConfiguration("opp", None), AccountConfiguration("training", None)
 
 # Instantiate two SimpleRLPlayer agents
 randy = RandomPlayer(battle_format="gen4randombattle", account_configuration=AccountConfiguration("rnady", None))
 opp = Opponent(battle_format="gen4randombattle", account_configuration=config1)
-train_env = SimpleRLPlayer(battle_format="gen4randombattle", account_configuration=config2, opponent=randy, start_challenging=False)
+train_env = SimpleRLPlayer(battle_format="gen4randombattle", account_configuration=config2, opponent=opp, start_challenging=False)
 # Compute dimensions
 n_action = train_env.action_space_size()
 input_shape = np.array(train_env.observation_space.shape).prod()
@@ -161,22 +159,17 @@ train_env.start_challenging(n_challenges=num_episodes)
 for e in range(1, num_episodes + 1):
     train_env.reset()
     initial_state = train_env.embed_battle(train_env.current_battle)
-
     state = np.reshape(initial_state, [1, agent.input_shape])
-
     done = False
     time = 0
     while not done:
-
         action = agent.act(state)
         next_state, reward, done, _, info = train_env.step(action)
         next_state = np.reshape(train_env.embed_battle(train_env.current_battle), [1, agent.input_shape])
         agent.remember(state, action, reward, next_state, done)
         state = next_state
-
         if done:
             print(f"episode: {e}/{num_episodes}, score: {time}")
-
         time += 1
 
     # Perform PPO optimization at the end of the episode
@@ -193,23 +186,24 @@ def test(agent, environments, nb_episodes=100):
 
     for environment in environments:
         victories = 0
-        for e in range(nb_episodes):
+        environment.start_challenging(n_challenges=nb_episodes)
+        for e in range(1, nb_episodes + 1):
             environment.reset()
             state = np.reshape(environment.embed_battle(environment.current_battle), [1, agent.input_shape])
             done = False
             while not done:
-
                 action = agent.act(state)
                 next_state, reward, done, _, info = environment.step(action)
                 next_state = np.reshape(environment.embed_battle(environment.current_battle), [1, agent.input_shape])
-
                 state = next_state
-
                 if done:
                     if reward > 0:  # Assuming a positive reward indicates a win
                         victories += 1
-                    print(f"Episode {e + 1}/{nb_episodes} finished. Reward: {reward}")
+                    print(f"Episode {e}/{nb_episodes} finished. Reward: {reward}")
         print(f"Test completed: {victories}/{nb_episodes} victories")
+
+        while not environment.current_battle._finished:
+            pass
         environment.reset_env(restart=False)
         environment.close()
 
@@ -218,7 +212,7 @@ def test(agent, environments, nb_episodes=100):
 opponent = RandomPlayer(battle_format="gen4randombattle",
                         account_configuration=AccountConfiguration("rand", None))
 eval_env = SimpleRLPlayer(
-    battle_format="gen4randombattle", opponent=opponent, start_challenging=True,
+    battle_format="gen4randombattle", opponent=opponent, start_challenging=False,
     account_configuration=AccountConfiguration("trained_vs_rand", None)
 )
 
@@ -230,9 +224,9 @@ heur = SimpleHeuristicsPlayer(battle_format="gen4randombattle",
 
 eval2 = AccountConfiguration("trained_vs_maxi", None)
 eval3 = AccountConfiguration("trained_vs_heur", None)
-eval_env2 = SimpleRLPlayer(battle_format="gen4randombattle", opponent=maxi, start_challenging=True,
+eval_env2 = SimpleRLPlayer(battle_format="gen4randombattle", opponent=maxi, start_challenging=False,
                            account_configuration=eval2)
-eval_env3 = SimpleRLPlayer(battle_format="gen4randombattle", opponent=heur, start_challenging=True,
+eval_env3 = SimpleRLPlayer(battle_format="gen4randombattle", opponent=heur, start_challenging=False,
                            account_configuration=eval3)
 #--------------------------------------------------------------------------------------------------------
 
