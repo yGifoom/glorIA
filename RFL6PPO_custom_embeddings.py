@@ -1,8 +1,12 @@
+from typing import Union, Awaitable
+
 import tensorflow as tf
 from keras import layers, models
 import numpy as np
 import random
 from collections import deque
+
+from keras.src.layers import layer
 from poke_env.environment.abstract_battle import AbstractBattle
 from poke_env.player import (
     Gen4EnvSinglePlayer,
@@ -11,13 +15,13 @@ from poke_env.player import (
     RandomPlayer,
     SimpleHeuristicsPlayer,
     background_cross_evaluate,
-    background_evaluate_player,
+    background_evaluate_player, BattleOrder,
 )
-import get_embeddings
+from poke_env.player.player import Player
+import src.gloria.embedding.get_embeddings as get_embeddings
 from tabulate import tabulate
 from poke_env import AccountConfiguration
 from gymnasium.spaces import Space, Box
-from gymnasium.utils.env_checker import check_env
 
 class SimpleRLPlayer(Gen4EnvSinglePlayer):
     def calc_reward(self, last_battle, current_battle) -> float:
@@ -28,23 +32,29 @@ class SimpleRLPlayer(Gen4EnvSinglePlayer):
     def embed_battle(self, battle: AbstractBattle) -> ObsType:
         return get_embeddings.GlorIA().embed_battle(battle)
 
-    def describe_embedding(self) -> Space: #still needs to be updated
-        low = [-1, -1, -1, -1, 0, 0, 0, 0, 0, 0]
-        high = [3, 3, 3, 3, 4, 4, 4, 4, 1, 1]
-        return Box(
-            np.array(low, dtype=np.float32),
-            np.array(high, dtype=np.float32),
-            dtype=np.float32,
-        )
+    def describe_embedding(self) -> Space: #Using Oscars method
+        return get_embeddings.GlorIA().describe_embedding()
+
+class Opponent(Player):
+    def embed_battle(self, battle: AbstractBattle) -> ObsType:
+        return get_embeddings.GlorIA().embed_battle(battle)
+    def choose_move(
+        self, battle: AbstractBattle
+    ) -> Union[BattleOrder, Awaitable[BattleOrder]]:
+        st = self.embed_battle(battle)
+        st = np.reshape(st, [1, agent.input_shape])
+        return train_env.action_to_move(action=agent.act(st), battle=battle)
+
 # Create the PPO-network
 def create_policy_network(input_shape, num_actions):
-    # Must add embedding layer after input layer (output size of Emb. Layer to be determined)
+    # Maybe add embedding layer after input layer (output size of Emb. Layer to be determined)
     # Possibliy add dropout layers in between Dense layers to prevent overfitting by adding noise
     # Layers and thickness will change due to input layer/ embedding layer size
     model = models.Sequential()
     model.add(layers.Input(shape=(input_shape,)))
-    model.add(layers.Dense(64, activation='relu'))
-    model.add(layers.Dense(64, activation='relu'))
+    model.add(layers.Dense(128, activation='relu'))
+    model.add(layers.Dense(128, activation='relu'))
+    model.add(layers.Dense(128, activation='relu'))
     model.add(layers.Dense(num_actions, activation='softmax'))  # Output probabilities
     return model
 
@@ -52,8 +62,9 @@ def create_policy_network(input_shape, num_actions):
 def create_value_network(input_shape):
     model = models.Sequential()
     model.add(layers.Input(shape=(input_shape,)))
-    model.add(layers.Dense(64, activation='relu'))
-    model.add(layers.Dense(64, activation='relu'))
+    model.add(layers.Dense(128, activation='relu'))
+    model.add(layers.Dense(128, activation='relu'))
+    model.add(layers.Dense(128, activation='relu'))
     model.add(layers.Dense(1, activation='linear'))  # Output a single value
     return model
 
@@ -127,40 +138,46 @@ class PPOAgent:
         self.actor.save_weights(name + "_actor")
         self.critic.save_weights(name + "_critic")
 
+config1, config2 = AccountConfiguration("GG", None), AccountConfiguration("Player2", None)
 
-config2, config5 = AccountConfiguration("Opp2", None), AccountConfiguration("GG2", None)
-opponent = RandomPlayer(battle_format="gen4randombattle",
-                        account_configuration=config2)
-train_env = SimpleRLPlayer(
-    battle_format="gen4randombattle", opponent=opponent, start_challenging=False,
-    account_configuration=config5
-)
-
+# Instantiate two SimpleRLPlayer agents
+randy = RandomPlayer(battle_format="gen4randombattle", account_configuration=AccountConfiguration("rnady", None))
+opp = Opponent(battle_format="gen4randombattle", account_configuration=config1)
+train_env = SimpleRLPlayer(battle_format="gen4randombattle", account_configuration=config2, opponent=randy, start_challenging=False)
 # Compute dimensions
 n_action = train_env.action_space_size()
-input_shape = 3023 # subject to change
+input_shape = np.array(train_env.observation_space.shape).prod()
 
 # Training loop
 num_episodes = 6
 batch_size = 2
 num_actions = n_action
 agent = PPOAgent(input_shape=input_shape, num_actions=num_actions)
+
+
 train_env.start_challenging(n_challenges=num_episodes)
+
+# Start the battles
 for e in range(1, num_episodes + 1):
     train_env.reset()
-    initial_state = train_env.embed_battle(train_env.current_battle)  # Embed the initial state
-    state = np.reshape(initial_state, [1, agent.input_shape])  # Reshape to fit the neural network input
+    initial_state = train_env.embed_battle(train_env.current_battle)
+
+    state = np.reshape(initial_state, [1, agent.input_shape])
+
     done = False
     time = 0
     while not done:
-        action = agent.act(state)  # Select action using the policy network
-        next_state, reward, done, _, info = train_env.step(action)  # Take the action
-        next_state = np.reshape(next_state, [1, agent.input_shape])
-        agent.remember(state, action, reward, next_state, done)  # Store experience
+
+        action = agent.act(state)
+        next_state, reward, done, _, info = train_env.step(action)
+        next_state = np.reshape(train_env.embed_battle(train_env.current_battle), [1, agent.input_shape])
+        agent.remember(state, action, reward, next_state, done)
         state = next_state
-        time += 1
+
         if done:
             print(f"episode: {e}/{num_episodes}, score: {time}")
+
+        time += 1
 
     # Perform PPO optimization at the end of the episode
     if len(agent.memory) > batch_size:
@@ -172,38 +189,45 @@ train_env.close()
 
 
 # Test Function
-def test(agent, environment, nb_episodes=100):
-    victories = 0
-    for e in range(nb_episodes):
-        environment.reset()
-        s = np.reshape(environment.embed_battle(environment.current_battle), [1, agent.input_shape])
-        done = False
-        while not done:
-            action = agent.act(s)
-            next_state, reward, done, _, info = environment.step(action)
-            next_state = np.reshape(environment.embed_battle(environment.current_battle), [1, agent.input_shape])
-            s = next_state
-            if done:
-                if reward > 0:  # Assuming a positive reward indicates a win
-                    victories += 1
-                print(f"Episode {e + 1}/{nb_episodes} finished. Reward: {reward}")
-    print(f"Test completed: {victories}/{nb_episodes} victories")
-    environment.close()
+def test(agent, environments, nb_episodes=100):
+
+    for environment in environments:
+        victories = 0
+        for e in range(nb_episodes):
+            environment.reset()
+            state = np.reshape(environment.embed_battle(environment.current_battle), [1, agent.input_shape])
+            done = False
+            while not done:
+
+                action = agent.act(state)
+                next_state, reward, done, _, info = environment.step(action)
+                next_state = np.reshape(environment.embed_battle(environment.current_battle), [1, agent.input_shape])
+
+                state = next_state
+
+                if done:
+                    if reward > 0:  # Assuming a positive reward indicates a win
+                        victories += 1
+                    print(f"Episode {e + 1}/{nb_episodes} finished. Reward: {reward}")
+        print(f"Test completed: {victories}/{nb_episodes} victories")
+        environment.reset_env(restart=False)
+        environment.close()
 
 
 # Players and Environments setup (ignore) --------------------------------------------------------------
 opponent = RandomPlayer(battle_format="gen4randombattle",
-                        account_configuration=config3)
+                        account_configuration=AccountConfiguration("rand", None))
 eval_env = SimpleRLPlayer(
     battle_format="gen4randombattle", opponent=opponent, start_challenging=True,
-    account_configuration=config6
+    account_configuration=AccountConfiguration("trained_vs_rand", None)
 )
-opp_maxi = AccountConfiguration("max", None)
-opp_heur = AccountConfiguration("heur", None)
+
 maxi = MaxBasePowerPlayer(battle_format="gen4randombattle",
-                          account_configuration=opp_maxi)
+                          account_configuration=AccountConfiguration("max", None))
+
 heur = SimpleHeuristicsPlayer(battle_format="gen4randombattle",
-                              account_configuration=opp_heur)
+                              account_configuration=AccountConfiguration("heur", None))
+
 eval2 = AccountConfiguration("trained_vs_maxi", None)
 eval3 = AccountConfiguration("trained_vs_heur", None)
 eval_env2 = SimpleRLPlayer(battle_format="gen4randombattle", opponent=maxi, start_challenging=True,
@@ -212,5 +236,6 @@ eval_env3 = SimpleRLPlayer(battle_format="gen4randombattle", opponent=heur, star
                            account_configuration=eval3)
 #--------------------------------------------------------------------------------------------------------
 
+test(agent, [eval_env, eval_env2, eval_env3], nb_episodes=2)
 
 # agent.model.save("dqn_model.h5")
