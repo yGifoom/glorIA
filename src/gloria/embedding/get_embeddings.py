@@ -6,7 +6,7 @@ from poke_env.player import Gen4EnvSinglePlayer
 import numpy as np
 from gymnasium.spaces import Box
 
-DATA_DIR = "C:/Users/ferna/PycharmProjects/glorIA/src/gloria/embedding/data/"
+DATA_DIR = "src/gloria/embedding/data/"
 
 with open(DATA_DIR + "gen4randombattle.json", "r") as f:
     GEN4 = json.load(f)
