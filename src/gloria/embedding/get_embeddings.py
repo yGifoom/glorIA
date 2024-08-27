@@ -411,7 +411,7 @@ class GlorIA:  # not inhereting from Gen4EnvSinglePlayer temorarily to test the 
             )  # EMBEDDING
             for i, move in enumerate(moves):
                 pp_bin = self.get_pp_bin(moves[move].current_pp)
-                pp[pp_bin - (3 * i)]
+                pp[pp_bin - (3 * i)] = 1
             last_used_move = np.array(
                 [self.last_move_dict.get(self.get_pkmn_battle_id(mon_name), 0)]
             )  # EMBEDDING
@@ -420,9 +420,9 @@ class GlorIA:  # not inhereting from Gen4EnvSinglePlayer temorarily to test the 
             type2 = np.zeros(18)  # can be null type
             # SOPRA AL 5 TOGLI 1, TOTALE 17 TIPI manca fairy (gen6)
             get_type_index = lambda x: x - 1 if x > 4 else x
-            type1[-get_type_index(mon.type_1.value)]
+            type1[-get_type_index(mon.type_1.value)] = 1
             if mon.type_2:
-                type2[-get_type_index(mon.type_2.value)]
+                type2[-get_type_index(mon.type_2.value)] = 1
             else:
                 type2[0] = 1
 
@@ -437,9 +437,9 @@ class GlorIA:  # not inhereting from Gen4EnvSinglePlayer temorarily to test the 
             for i, stat in enumerate(mon.boosts):
                 value = mon.boosts[stat]
                 if value > 0:
-                    boosts_encoding[value + 5 + (12 * i)]
+                    boosts_encoding[value + 5 + (12 * i)] = 1
                 elif value < 0:
-                    boosts_encoding[value + 6 + (12 * i)]
+                    boosts_encoding[value + 6 + (12 * i)] = 1
 
             effects_encoding = np.zeros(19)
             taunt = np.zeros(5)
@@ -460,7 +460,10 @@ class GlorIA:  # not inhereting from Gen4EnvSinglePlayer temorarily to test the 
                     slow_start[-turn] = 1
 
             gender = np.zeros(3)
-            gender[-mon.gender.value] = 1
+            if mon.gender is None:
+                gender[-3] = 1
+            else:
+                gender[-mon.gender.value] = 1
             trapped = np.array([int(battle.trapped)])
             status = np.zeros(7)
             if mon.status:
