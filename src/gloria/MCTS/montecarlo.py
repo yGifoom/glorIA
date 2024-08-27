@@ -55,6 +55,7 @@ class Node():
         available_actions = can_moves(s)
         self.isterminal = True if np.count_nonzero(available_actions) > 0 else False # is leaf or terminal?
         self.actions: np.array = self._encode_actions(available_actions) # actions available from state s
+        self.encoding = GlorIA.embed_battle(s).flatten()
 
     def update(self, action, v):
         '''
@@ -81,11 +82,13 @@ class Node():
 
     def __hash__(self):
 
-        obs = np.array(map(lambda x: x.events, self.state.observations.values())).flatten()
+        obs = self.encoding.flatten()
+
+        '''obs = np.array(map(lambda x: x.events, self.state.observations.values())).flatten()''' # this encodes the actual perfect state
 
         to_encode = tuple(obs)
 
-        hash(to_encode)
+        return hash(to_encode)
         """
         tuple(self.state.available_moves), 
         tuple(self.state.available_switches),
@@ -131,13 +134,13 @@ class MCTS():
         # parsing trough the array each time might be too time consuming
         self.simulator = Simulator()
         self.root = Node(state)
-        self.children: dict = {self.root: None}
+        self.children: dict[Node, list[Node]] = {self.root: None}
 
 
     def rollout(self):
         path = self._choose(self.root) # find path to a leaf/terminal node
         leaf = path[-1] 
-        self._backpropagate(path, critic_head(leaf.s))
+        self._backpropagate(path, critic_head(leaf.encoding))
 
     def act(self):
         '''
@@ -151,7 +154,7 @@ class MCTS():
 
         old_root = self.root
 
-        new_root_idx = self.root.state == np.array(map(lambda x: x.state, self.children[self.root]))
+        new_root_idx = self.root.encoding == np.array(map(lambda x: x.encoding, self.children[self.root]))
         if not np.count_nonzero(new_root_idx): 
             # somehow we did not see this state previously, create new tree
             self.root = Node(state)
@@ -175,18 +178,17 @@ class MCTS():
             expand_action: int = np.argmax(map(lambda x: 0 if x == 0 else x.U, node.actions)) # array is either 0 or action object
             path.append(node, node[expand_action])
             
-            next_state = self.simulator(node.state, expand_action) # expand action is an index of the move
+            next_state: Battle = self.simulator(node.state, self.simulator.sim(expand_action)) # expand action is an index of the move
+            new_node = Node(next_state)
 
-            states_found = next_state == np.array(map(lambda x: x.state, self.children[node]))
+            states_found = new_node.encoding == np.array(map(lambda x: x.encoding, self.children[node]))
             if not np.count_nonzero(states_found): 
                 # means that we never visited this state
                 if not self.children[node]:
-                    self.children[node] = [next_state]
+                    self.children[node] = [new_node]
                 else:
-                    self.children[node].append(next_state)
-                    
-                node = Node(next_state)
-                break
+                    self.children[node].append(new_node)
+                break # we break out of the loop and backpropagate
             node = self.children[node][np.argmin(states_found)] # if we have it in the children we expand it and go on
         return path
 
