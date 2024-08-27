@@ -6,7 +6,7 @@ from poke_env.player import Gen4EnvSinglePlayer
 import numpy as np
 from gymnasium.spaces import Box
 
-DATA_DIR = "C:/Users/ferna/PycharmProjects/glorIA/src/gloria/embedding/data/"
+DATA_DIR = "src/gloria/embedding/data/"  # please nand run the code from the root directory of the project
 
 with open(DATA_DIR + "gen4randombattle.json", "r") as f:
     GEN4 = json.load(f)
@@ -30,6 +30,7 @@ def count_abilities(gen):
     for mon in gen:
         for ability in gen[mon]["abilities"]:
             abilities.add(to_id_str(ability))
+    abilities.add("oblivious")
     sorted_abilities = dict(
         zip(sorted(abilities), [i + 1 for i in range(len(abilities))])
     )
@@ -64,7 +65,7 @@ def count_moves(gen):
     return sorted_moves
 
 
-# count_abilities(GEN4)
+count_abilities(GEN4)
 # count_items(GEN4)
 # count_moves(GEN4)
 # get_pokemons(GEN4)
