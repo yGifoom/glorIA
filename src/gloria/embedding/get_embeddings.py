@@ -94,7 +94,7 @@ def get_unknown_pokemon():
     encore = np.zeros(8)
     slow_start = np.zeros(5)
 
-    gender = np.zeros(3)
+    # gender = np.zeros(3)
     trapped = np.array([0])
     status = np.zeros(7)
 
@@ -128,7 +128,7 @@ def get_unknown_pokemon():
             taunt,
             encore,
             slow_start,
-            gender,
+            # gender,
             trapped,
             status,
             toxic_counter,
@@ -210,11 +210,11 @@ class GlorIA:  # not inhereting from Gen4EnvSinglePlayer temorarily to test the 
             188,
         ] 
         low = np.concatenate(
-            [np.zeros(106), [*EMBEDDED_VECTOR_MIN, *np.zeros(236)] * 12]
+            [np.zeros(106), [*EMBEDDED_VECTOR_MIN, *np.zeros(233)] * 12]
         )
 
         high = np.concatenate(
-            [np.ones(106), [*EMBEDDED_VECTOR_MAX, *np.ones(236)] * 12]
+            [np.ones(106), [*EMBEDDED_VECTOR_MAX, *np.ones(233)] * 12]
         )
         return Box(low, high, dtype=np.float32)
 
@@ -465,8 +465,8 @@ class GlorIA:  # not inhereting from Gen4EnvSinglePlayer temorarily to test the 
                     turn = mon.effects[effect]
                     slow_start[-turn] = 1
 
-            gender = np.zeros(3)
-            gender[-mon.gender.value] = 1
+            # gender = np.zeros(3)
+            # gender[-mon.gender.value] = 1
             trapped = np.array([int(battle.trapped)])
             status = np.zeros(7)
             if mon.status:
@@ -512,7 +512,7 @@ class GlorIA:  # not inhereting from Gen4EnvSinglePlayer temorarily to test the 
                         taunt,
                         encore,
                         slow_start,
-                        gender,
+                        # gender,
                         trapped,
                         status,
                         toxic_counter,
