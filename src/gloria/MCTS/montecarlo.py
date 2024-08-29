@@ -53,7 +53,7 @@ class Node():
         self.state: Battle = s # battle state
         self.M = 0 # times this node was visited during rollouts
         available_actions = can_moves(s)
-        self.isterminal = True if np.count_nonzero(available_actions) > 0 else False # is leaf or terminal?
+        self.isterminal = not np.count_nonzero(available_actions) > 0 # is leaf or terminal?
         self.actions: np.array = self._encode_actions(available_actions) # actions available from state s
         self.encoding = GlorIA.embed_battle(s).flatten()
 
@@ -73,16 +73,14 @@ class Node():
                 available_actions[i] = action(i, prob_for_actions[i]) 
 
         return np.array(available_actions)
-
-
     
     def __eq__(node1, node2):
-        res = np.array_equal(node1.state, node2.state)
+        res = np.array_equal(node1.encoding, node2.encoding)
         return res
 
     def __hash__(self):
 
-        obs = self.encoding.flatten()
+        obs = self.encoding
 
         '''obs = np.array(map(lambda x: x.events, self.state.observations.values())).flatten()''' # this encodes the actual perfect state
 
@@ -129,9 +127,6 @@ class action:
 
 class MCTS():
     def __init__(self, state: Battle):
-       
-        # TODO: translate available_actions so that it is a dictionary? 
-        # parsing trough the array each time might be too time consuming
         self.simulator = Simulator()
         self.root = Node(state)
         self.children: dict[Node, list[Node]] = {self.root: None}
@@ -163,7 +158,6 @@ class MCTS():
 
         self.children.pop(old_root) 
             
-    
     def _backpropagate(self, path: list[Node], v):
         for node, action in path:
             node.update(action, v)
@@ -182,8 +176,8 @@ class MCTS():
             new_node = Node(next_state)
 
             states_found = new_node.encoding == np.array(map(lambda x: x.encoding, self.children[node]))
-            if not np.count_nonzero(states_found): 
-                # means that we never visited this state
+            if not np.count_nonzero(states_found) or new_node.isterminal: 
+                # means that we never visited this state or that it is terminal
                 if not self.children[node]:
                     self.children[node] = [new_node]
                 else:
