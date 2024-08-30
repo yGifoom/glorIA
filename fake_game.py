@@ -30,12 +30,7 @@ class DebugRandomPlayer(RandomPlayer):
         # if battle.force_switch and not (battle.active_pokemon.fainted or battle.opponent_active_pokemon.fainted):
         #     pass
         
-        try:
-            EMBED_JSON[battle.turn] = PLAYER.test_embedding(battle)
-        except Exception:
-            print(f"Exception {Exception} occurred, saving log")
-            with open("check_encoding.json", "a") as f:  # encoding data for a problematic battle
-                json.dump(EMBED_JSON, f)
+        EMBED_JSON[battle.turn] = PLAYER.test_embedding(battle)
         # PLAYER.test_embedding(battle)
 
         # if battle.turn == 6:
@@ -60,18 +55,15 @@ second_random_player = RandomPlayer(battle_format="gen4randombattle")
 # Here we are using asynchronous programming (await) to start the battle.
 async def test():
     global color_change
-    try:
-        async with asyncio.timeout(10):
-            await random_player.battle_against(second_random_player, n_battles=1)
-            if i%100 == 0:
-                print(f"battle {i}")
-    except TimeoutError:
-        print(f"function timed out at battle {i}")
+    await random_player.battle_against(second_random_player, n_battles=1)
+    
+    print(f"battle {i}")
+    if i%100 == 0:        
         with open("check_encoding_timeout.json", "a") as f:  # encoding data for a problematic battle
             json.dump(EMBED_JSON, f)
         
     
-for i in range(10000):
+for i in range(1):
     asyncio.run(test())  # RUNNING THIS METHOD WILL SAVE THE EMBEDDING DATA FOR ONE BATTLE at a time
 
 print("Fine.")
