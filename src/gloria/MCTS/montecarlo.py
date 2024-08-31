@@ -2,6 +2,7 @@ import numpy as np
 from poke_env.environment import Battle, observation
 from gloria.embedding.get_embeddings import MOVES, POKEMONS, GlorIA
 from gloria.MCTS.simulator import Simulator
+from time import time
 # MISSING FUNCTION AND IMPORTS:
 n_options = 5 #len(POKEMONS) + len(MOVES)
 
@@ -130,9 +131,14 @@ class MCTS():
         self.simulator = Simulator()
         self.root = Node(state)
         self.children: dict[Node, list[Node]] = {self.root: None}
+        self.starting_time = time()
+        self.timer = 10 #TODO: timer for montecarlo in seconds, after every rollout check
 
 
     def rollout(self):
+        if time() - self.starting_time > self.timer: # time's up! return best action
+            self.act()
+            return
         path = self._choose(self.root) # find path to a leaf/terminal node
         leaf = path[-1] 
         self._backpropagate(path, critic_head(leaf.encoding))
@@ -144,6 +150,7 @@ class MCTS():
         '''
         action = np.argmax(np.array(map(lambda x: x.N, self.root.actions)))
         return self.simulator.decode_action(action.a) # the decoded action to take, DEPENDS ON THE IMPLEMENTATION OF HOW GLORIA WILL TAKE ACTIONS
+        # TODO FIX THIS RETURN DEPENDING ON GLORIA IMPLEMENTATION
 
     def new_root(self, state: Battle):
 
