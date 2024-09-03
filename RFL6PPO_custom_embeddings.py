@@ -1,4 +1,4 @@
-from typing import Union, Awaitable
+from typing import List, Union, Awaitable
 
 import tensorflow as tf
 from keras import layers, models
@@ -8,40 +8,81 @@ from collections import deque
 
 from keras.src.layers import layer
 from poke_env.environment.abstract_battle import AbstractBattle
+from poke_env.player.battle_order import ForfeitBattleOrder
 from poke_env.player import (
     Gen4EnvSinglePlayer,
     MaxBasePowerPlayer,
     ObsType,
     RandomPlayer,
     SimpleHeuristicsPlayer,
+    Player,
     background_cross_evaluate,
     background_evaluate_player, BattleOrder,
 )
 from poke_env.player.player import Player
-import src.gloria.embedding.get_embeddings as get_embeddings
+from src.gloria.embedding.get_embeddings import GlorIA # POKEMONS, MOVES, ABILITIES, ITEMS, UNKNOWN_POKEMON, EFFECTS
 from tabulate import tabulate
 from poke_env import AccountConfiguration
 from gymnasium.spaces import Space, Box
 
-class SimpleRLPlayer(Gen4EnvSinglePlayer):
-    def calc_reward(self, last_battle, current_battle) -> float:
-        return self.reward_computing_helper(
-            current_battle, fainted_value=2.0, hp_value=1.0, victory_value=30.0
-        )
-
-    def embed_battle(self, battle: AbstractBattle) -> ObsType:
-        return get_embeddings.GlorIA().embed_battle(battle)
-
-    def describe_embedding(self) -> Space: #Using Oscars method
-        return get_embeddings.GlorIA().describe_embedding()
 
 class Opponent(Player):
-    def embed_battle(self, battle: AbstractBattle) -> ObsType:
-        return get_embeddings.GlorIA().embed_battle(battle)
+    def __init__(self, battle_format, account_config):
+        super().__init__(battle_format=battle_format, account_configuration=account_config)
+        self.gloria_instance = GlorIA()
+        self.model: PPOAgent = None
+        self.previous_state = None
+        self.previous_action = None
+        self.current_battle_tag = None
+
+
+    def action_to_move(self, action: int, battle: AbstractBattle) -> BattleOrder:
+        """Converts actions to move orders.
+
+        The conversion is done as follows:
+
+        action = -1:
+            The battle will be forfeited.
+        0 <= action < 4:
+            The actionth available move in battle.available_moves is executed.
+        4 <= action < 10
+            The action - 4th available switch in battle.available_switches is executed.
+
+        If the proposed action is illegal, a random legal move is performed.
+
+        :param action: The action to convert.
+        :type action: int
+        :param battle: The battle in which to act.
+        :type battle: Battle
+        :return: the order to send to the server.
+        :rtype: str
+        """
+        if action == -1:
+            return ForfeitBattleOrder()
+        elif (
+            action < 4
+            and action < len(battle.available_moves)
+            and not battle.force_switch
+        ):
+            return self.create_order(battle.available_moves[action])
+        elif 0 <= action - 4 < len(battle.available_switches):
+            return self.create_order(battle.available_switches[action - 4])
+        else:
+            return self.choose_random_move(battle)
+
     def choose_move(self, battle: AbstractBattle):
-        st = self.embed_battle(battle)
+        if self.current_battle_tag is None:
+            self.current_battle_tag = battle.battle_tag
+        st = self.gloria_instance.embed_battle(battle)
         st = np.reshape(st, [1, agent.input_shape])
-        return train_env.action_to_move(action=agent.act(st), battle=battle)
+        action = agent.act(st)
+        finished = battle.finished
+        if self.previous_state is not None:  # also action and reward are None
+            agent.remember(self.previous_state, self.previous_action, 0, st, finished)
+        self.previous_state = st
+        self.previous_action = action
+
+        return self.action_to_move(action=action, battle=battle)
 
 def create_embedding_layers(input_layer):
     
@@ -104,9 +145,8 @@ def create_value_network(input_shape):
     
     return model
 
-
 class PPOAgent:
-    def __init__(self, input_shape, num_actions, gamma=0.95, epsilon=0.2, actor_lr=0.0003, critic_lr=0.001):
+    def __init__(self, input_shape, num_actions, gamma=0.9999, epsilon=0.2, actor_lr=0.000058, critic_lr=0.000058):
         self.input_shape = input_shape
         self.num_actions = num_actions
         self.gamma = gamma
@@ -176,17 +216,17 @@ class PPOAgent:
 
 config1, config2 = AccountConfiguration("opp", None), AccountConfiguration("training", None)
 
-# Instantiate two SimpleRLPlayer agents
+# Instantiate two GlorIA agents
 randy = RandomPlayer(battle_format="gen4randombattle", account_configuration=AccountConfiguration("rnady", None))
 opp = Opponent(battle_format="gen4randombattle", account_configuration=config1)
-train_env = SimpleRLPlayer(battle_format="gen4randombattle", account_configuration=config2, opponent=opp, start_challenging=False)
+train_env = GlorIA(battle_format="gen4randombattle", account_configuration=config2, opponent=opp, start_challenging=False)
 # Compute dimensions
 n_action = train_env.action_space_size()
 input_shape = np.array(train_env.observation_space.shape).prod()
 
 # Training loop
 num_episodes = 6
-batch_size = 2
+batch_size = 16
 num_actions = n_action
 agent = PPOAgent(input_shape=input_shape, num_actions=num_actions)
 
@@ -209,7 +249,9 @@ for e in range(1, num_episodes + 1):
         if done:
             print(f"episode: {e}/{num_episodes}, score: {time}")
         time += 1
-
+    opponent_last_state = opp.battles[opp.current_battle_tag]
+    agent.remember(opp.previous_state, opp.previous_action, -reward, opponent_last_state, done)
+    opp.current_battle_tag = None  # Reset the battle tag for the opponent
     # Perform PPO optimization at the end of the episode
     if len(agent.memory) > batch_size:
         agent.replay(batch_size)
@@ -249,7 +291,7 @@ def test(agent, environments, nb_episodes=100):
 # Players and Environments setup (ignore) --------------------------------------------------------------
 opponent = RandomPlayer(battle_format="gen4randombattle",
                         account_configuration=AccountConfiguration("rand", None))
-eval_env = SimpleRLPlayer(
+eval_env = GlorIA(
     battle_format="gen4randombattle", opponent=opponent, start_challenging=False,
     account_configuration=AccountConfiguration("trained_vs_rand", None)
 )
@@ -262,9 +304,9 @@ heur = SimpleHeuristicsPlayer(battle_format="gen4randombattle",
 
 eval2 = AccountConfiguration("trained_vs_maxi", None)
 eval3 = AccountConfiguration("trained_vs_heur", None)
-eval_env2 = SimpleRLPlayer(battle_format="gen4randombattle", opponent=maxi, start_challenging=False,
+eval_env2 = GlorIA(battle_format="gen4randombattle", opponent=maxi, start_challenging=False,
                            account_configuration=eval2)
-eval_env3 = SimpleRLPlayer(battle_format="gen4randombattle", opponent=heur, start_challenging=False,
+eval_env3 = GlorIA(battle_format="gen4randombattle", opponent=heur, start_challenging=False,
                            account_configuration=eval3)
 #--------------------------------------------------------------------------------------------------------
 

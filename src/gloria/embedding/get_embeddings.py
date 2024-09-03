@@ -172,8 +172,10 @@ with open(DATA_DIR + "gen4effects.json", "r") as f:
 #            "SANDSTORM": np.zeros(9)}
 
 
-class GlorIA:  # not inhereting from Gen4EnvSinglePlayer temorarily to test the embed_battle method
-    last_move_dict = {}
+class GlorIA(Gen4EnvSinglePlayer):  # not inhereting from Gen4EnvSinglePlayer temorarily to test the embed_battle method
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.last_move_dict = {}
 
     def test_embedding(self, battle: Battle):
         arr = self.embed_battle(battle).tolist()
@@ -182,8 +184,6 @@ class GlorIA:  # not inhereting from Gen4EnvSinglePlayer temorarily to test the 
     def get_pkmn_battle_id(self, pkmn_id):
         return f"{pkmn_id[:2]}a{pkmn_id[2:]}"
 
-    def decode_battle_vector(self, vector: np.ndarray):
-        pass
 
     def calc_reward(self, last_battle, current_battle) -> float:
         return self.reward_computing_helper(current_battle, victory_value=1.0)
