@@ -6,7 +6,7 @@ import numpy as np
 import random
 from collections import deque
 
-from keras.src.layers import layer
+# from keras.layers import layer
 from poke_env.environment.abstract_battle import AbstractBattle
 from poke_env.player.battle_order import ForfeitBattleOrder
 from poke_env.player import (
@@ -27,9 +27,9 @@ from gymnasium.spaces import Space, Box
 
 
 class Opponent(Player):
-    def __init__(self, battle_format, account_config):
-        super().__init__(battle_format=battle_format, account_configuration=account_config)
-        self.gloria_instance = GlorIA()
+    def __init__(self, battle_format, account_configuration):
+        super().__init__(battle_format=battle_format, account_configuration=account_configuration)
+        self.gloria_instance = GlorIA(opponent=self, battle_format=battle_format)
         self.model: PPOAgent = None
         self.previous_state = None
         self.previous_action = None
