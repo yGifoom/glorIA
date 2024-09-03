@@ -6,7 +6,7 @@ from poke_env.player import Gen4EnvSinglePlayer
 import numpy as np
 from gymnasium.spaces import Box
 
-DATA_DIR = "src/gloria/embedding/data/"
+DATA_DIR = "src/gloria/embedding/data/"  # please nand run the code from the root directory of the project
 
 with open(DATA_DIR + "gen4randombattle.json", "r") as f:
     GEN4 = json.load(f)
@@ -30,6 +30,7 @@ def count_abilities(gen):
     for mon in gen:
         for ability in gen[mon]["abilities"]:
             abilities.add(to_id_str(ability))
+    abilities.add("oblivious")
     sorted_abilities = dict(
         zip(sorted(abilities), [i + 1 for i in range(len(abilities))])
     )
@@ -64,7 +65,7 @@ def count_moves(gen):
     return sorted_moves
 
 
-# count_abilities(GEN4)
+count_abilities(GEN4)
 # count_items(GEN4)
 # count_moves(GEN4)
 # get_pokemons(GEN4)
@@ -93,7 +94,7 @@ def get_unknown_pokemon():
     encore = np.zeros(8)
     slow_start = np.zeros(5)
 
-    gender = np.zeros(3)
+    # gender = np.zeros(3)
     trapped = np.array([0])
     status = np.zeros(7)
 
@@ -127,7 +128,7 @@ def get_unknown_pokemon():
             taunt,
             encore,
             slow_start,
-            gender,
+            # gender,
             trapped,
             status,
             toxic_counter,
@@ -209,11 +210,11 @@ class GlorIA:  # not inhereting from Gen4EnvSinglePlayer temorarily to test the 
             188,
         ] 
         low = np.concatenate(
-            [np.zeros(106), [*EMBEDDED_VECTOR_MIN, *np.zeros(236)] * 12]
+            [np.zeros(106), [*EMBEDDED_VECTOR_MIN, *np.zeros(233)] * 12]
         )
 
         high = np.concatenate(
-            [np.ones(106), [*EMBEDDED_VECTOR_MAX, *np.ones(236)] * 12]
+            [np.ones(106), [*EMBEDDED_VECTOR_MAX, *np.ones(233)] * 12]
         )
         return Box(low, high, dtype=np.float32)
 
@@ -464,8 +465,8 @@ class GlorIA:  # not inhereting from Gen4EnvSinglePlayer temorarily to test the 
                     turn = mon.effects[effect]
                     slow_start[-turn] = 1
 
-            gender = np.zeros(3)
-            gender[-mon.gender.value] = 1
+            # gender = np.zeros(3)
+            # gender[-mon.gender.value] = 1
             trapped = np.array([int(battle.trapped)])
             status = np.zeros(7)
             if mon.status:
@@ -511,7 +512,7 @@ class GlorIA:  # not inhereting from Gen4EnvSinglePlayer temorarily to test the 
                         taunt,
                         encore,
                         slow_start,
-                        gender,
+                        # gender,
                         trapped,
                         status,
                         toxic_counter,
