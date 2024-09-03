@@ -43,27 +43,65 @@ class Opponent(Player):
         st = np.reshape(st, [1, agent.input_shape])
         return train_env.action_to_move(action=agent.act(st), battle=battle)
 
+def create_embedding_layers(input_layer):
+    
+    # max number in vocab, dimentions to be mapped to, slice of input layer to embed
+    to_embed = {
+        "species" : {
+           "size" :  296, "dims": 158, "in": [106 + i*(233+8) for i in range(12)],
+        },
+        "abilities": {
+           "size" :  103, "dims": 52, "in": [107 + i*(233+8) for i in range(12)],
+        },
+        "items" : {
+           "size" :  38, "dims": 19, "in": [108 + i*(233+8) for i in range(12)],
+        },
+        "moves" : {
+           "size" :  188, "dims": 94, "in": [[109 + j + i*(233+8) for j in range(5)] for i in range(12)],
+        },
+    }
+    
+    embeds = list()
+    for feature in to_embed:
+        embeds.append(
+            layers.Embedding(input_dim=to_embed[feature]["size"], 
+                         output_dim=to_embed[feature]["dims"], 
+                         name=feature)(input_layer[to_embed[feature]["in"]])
+        )
+        
+    res = layers.Flatten()(
+        layers.Concatenate()(embeds)
+        )
+    
+    return res
+
 # Create the PPO-network
 def create_policy_network(input_shape, num_actions):
     # Maybe add embedding layer after input layer (output size of Emb. Layer to be determined)
     # Possibliy add dropout layers in between Dense layers to prevent overfitting by adding noise
     # Layers and thickness will change due to input layer/ embedding layer size
-    model = models.Sequential()
-    model.add(layers.Input(shape=(input_shape,)))
-    model.add(layers.Dense(128, activation='relu'))
-    model.add(layers.Dense(128, activation='relu'))
-    model.add(layers.Dense(128, activation='relu'))
-    model.add(layers.Dense(num_actions, activation='softmax'))  # Output probabilities
-    return model
+    input_all = layers.Input(shape=(input_shape,), dtype='int32', name='input_all')
+    
+    embedding = create_embedding_layers(input_all)
+    dense_1 = layers.Dense(128, activation='relu')(embedding)
+    dense_2 = layers.Dense(128, activation='relu')(dense_1)
+    dense_3 = layers.Dense(128, activation='relu')(dense_2)
+    output = layers.Dense(num_actions, activation='softmax')(dense_3)  # Output probabilities
+    model = models.Model(inputs = input_all, output = output)
+    
+    return model 
 
 
 def create_value_network(input_shape):
-    model = models.Sequential()
-    model.add(layers.Input(shape=(input_shape,)))
-    model.add(layers.Dense(128, activation='relu'))
-    model.add(layers.Dense(128, activation='relu'))
-    model.add(layers.Dense(128, activation='relu'))
-    model.add(layers.Dense(1, activation='linear'))  # Output a single value
+    input_all = layers.Input(shape=(input_shape,), dtype='int32', name='input_all')
+    
+    embedding = create_embedding_layers(input_all)
+    dense_1 = layers.Dense(128, activation='relu')(embedding)
+    dense_2 = layers.Dense(128, activation='relu')(dense_1)
+    dense_3 = layers.Dense(128, activation='relu')(dense_2)
+    output = layers.Dense(1, activation='linear')(dense_3)  # Output probabilities
+    model = models.Model(inputs = input_all, output = output)
+    
     return model
 
 
