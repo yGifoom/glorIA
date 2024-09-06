@@ -4,6 +4,7 @@ import tensorflow as tf
 from keras import layers, models
 import numpy as np
 import random
+import time as t
 from collections import deque
 
 # from keras.layers import layer
@@ -29,7 +30,7 @@ from gymnasium.spaces import Space, Box
 class Opponent(Player):
     def __init__(self, battle_format, account_configuration):
         super().__init__(battle_format=battle_format, account_configuration=account_configuration)
-        self.gloria_instance = GlorIA(opponent=self, battle_format=battle_format)
+        self.gloria_instance = GlorIA(opponent=self, battle_format=battle_format, start_challenging=False)
         self.model: PPOAgent = None
         self.previous_state = None
         self.previous_action = None
@@ -95,7 +96,7 @@ def create_embedding_layers(input_layer):
            "size" :  103, "dims": 52, "in": [107 + i*(233+8) for i in range(12)],
         },
         "items" : {
-           "size" :  38, "dims": 19, "in": [108 + i*(233+8) for i in range(12)],
+           "size" :  39, "dims": 19, "in": [108 + i*(233+8) for i in range(12)],  # 38 + no_item which is len ITEMS + 1
         },
         "moves" : {
            "size" :  188, "dims": 94, "in": [[109 + j + i*(233+8) for j in range(5)] for i in range(12)],
@@ -243,7 +244,7 @@ input_shape = np.array(train_env.observation_space.shape).prod()
 
 # Training loop
 num_episodes = 6
-batch_size = 16
+batch_size = 2
 num_actions = n_action
 agent = PPOAgent(input_shape=input_shape, num_actions=num_actions)
 opp.agent = agent
@@ -252,6 +253,7 @@ opp.agent = agent
 train_env.start_challenging(n_challenges=num_episodes)
 
 # Start the battles
+
 for e in range(1, num_episodes + 1):
     train_env.reset()
     initial_state = train_env.embed_battle(train_env.current_battle)
@@ -259,7 +261,12 @@ for e in range(1, num_episodes + 1):
     done = False
     time = 0
     while not done:
-        action = agent.act(state)
+        try:
+            action = agent.act(state)
+        except Exception as e:
+            print(e, "AAAAAAAAAAAAAAAAAA")
+            print(state)
+            exit()
         next_state, reward, done, _, info = train_env.step(action)
         next_state = np.reshape(train_env.embed_battle(train_env.current_battle), [1, agent.input_shape])
         agent.remember(state, action, reward, next_state, done)
@@ -267,7 +274,7 @@ for e in range(1, num_episodes + 1):
         if done:
             print(f"episode: {e}/{num_episodes}, score: {time}")
         time += 1
-    opponent_last_state = opp.battles[opp.current_battle_tag]
+    opponent_last_state = opp.gloria_instance.embed_battle(opp.battles[opp.current_battle_tag])
     agent.remember(opp.previous_state, opp.previous_action, -reward, opponent_last_state, done)
     opp.current_battle_tag = None  # Reset the battle tag for the opponent
     # Perform PPO optimization at the end of the episode
@@ -275,7 +282,9 @@ for e in range(1, num_episodes + 1):
         agent.replay(batch_size)
 
 # Reset environment
-train_env.reset_env(restart=False)
+# train_env.reset()
+
+# train_env.reset_env(restart=False)
 train_env.close()
 
 
@@ -328,6 +337,6 @@ eval_env3 = GlorIA(battle_format="gen4randombattle", opponent=heur, start_challe
                            account_configuration=eval3)
 #--------------------------------------------------------------------------------------------------------
 
-test(agent, [eval_env, eval_env2, eval_env3], nb_episodes=2)
+# test(agent, [eval_env, eval_env2, eval_env3], nb_episodes=2)
 
 # agent.model.save("dqn_model.h5")
