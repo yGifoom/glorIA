@@ -341,6 +341,7 @@ eval_env3 = GlorIA(battle_format="gen4randombattle", opponent=heur, start_challe
                    account_configuration=eval3)
 # --------------------------------------------------------------------------------------------------------
 
+agent.plot_training_history()
 test(agent, [eval_env, eval_env2, eval_env3], nb_episodes=2)
 
 # agent.model.save("dqn_model.h5")
