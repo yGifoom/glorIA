@@ -74,11 +74,11 @@ class Opponent(Player):
         if self.current_battle_tag is None:
             self.current_battle_tag = battle.battle_tag
         st = self.gloria_instance.embed_battle(battle)
-        st = np.reshape(st, [1, agent.input_shape])
-        action = agent.act(st)
+        st = np.reshape(st, [1, self.agent.input_shape])
+        action = self.agent.act(st)
         finished = battle.finished
         if self.previous_state is not None:  # also action and reward are None
-            agent.remember(self.previous_state, self.previous_action, 0, st, finished)
+            self.agent.remember(self.previous_state, self.previous_action, 0, st, finished)
         self.previous_state = st
         self.previous_action = action
 
@@ -103,18 +103,35 @@ def create_embedding_layers(input_layer):
     }
     
     embeds = list()
-    for feature in to_embed:
-        embeds.append(
-            layers.Embedding(input_dim=to_embed[feature]["size"], 
-                         output_dim=to_embed[feature]["dims"], 
-                         name=feature)(input_layer[to_embed[feature]["in"]])
-        )
-        
-    res = layers.Flatten()(
-        layers.Concatenate()(embeds)
-        )
     
-    return res
+        # Iterate over the features to be embedded
+    for feature, params in to_embed.items():
+        vocab_size = params['size']
+        embed_dim = params['dims']
+        input_indices = params['in']
+
+        # Check if input indices is a list of lists (for moves) or a flat list (for species, abilities, items)
+        if isinstance(input_indices[0], list):
+            # For features with multiple inputs (like moves)
+            for indices in input_indices:
+                input_slice = tf.keras.layers.Lambda(lambda x: tf.gather(x, indices, axis=1))(input_layer)
+                embedding = layers.Embedding(input_dim=vocab_size, output_dim=embed_dim)(input_slice)
+                embeds.append(layers.Flatten()(embedding))
+        else:
+            # For features with single input per item in list
+            for index in input_indices:
+                input_slice = tf.keras.layers.Lambda(lambda x: x[:, index:index + 1])(input_layer)
+                embedding = layers.Embedding(input_dim=vocab_size, output_dim=embed_dim)(input_slice)
+                embeds.append(layers.Flatten()(embedding))
+
+    # Concatenate all embedding layers
+    if embeds:
+        concatenated_embeds = layers.Concatenate()(embeds)
+    else:
+        concatenated_embeds = None
+
+    # Returning the final model or layer output containing the embeddings
+    return concatenated_embeds
 
 # Create the PPO-network
 def create_policy_network(input_shape, num_actions):
@@ -128,7 +145,7 @@ def create_policy_network(input_shape, num_actions):
     dense_2 = layers.Dense(128, activation='relu')(dense_1)
     dense_3 = layers.Dense(128, activation='relu')(dense_2)
     output = layers.Dense(num_actions, activation='softmax')(dense_3)  # Output probabilities
-    model = models.Model(inputs = input_all, output = output)
+    model = models.Model(inputs = input_all, outputs = output)
     
     return model 
 
@@ -141,7 +158,7 @@ def create_value_network(input_shape):
     dense_2 = layers.Dense(128, activation='relu')(dense_1)
     dense_3 = layers.Dense(128, activation='relu')(dense_2)
     output = layers.Dense(1, activation='linear')(dense_3)  # Output probabilities
-    model = models.Model(inputs = input_all, output = output)
+    model = models.Model(inputs = input_all, outputs = output)
     
     return model
 
@@ -229,6 +246,7 @@ num_episodes = 6
 batch_size = 16
 num_actions = n_action
 agent = PPOAgent(input_shape=input_shape, num_actions=num_actions)
+opp.agent = agent
 
 
 train_env.start_challenging(n_challenges=num_episodes)
