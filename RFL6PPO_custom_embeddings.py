@@ -8,6 +8,7 @@ from collections import deque
 # from keras.layers import layer
 from poke_env.environment.abstract_battle import AbstractBattle
 from poke_env.player.battle_order import ForfeitBattleOrder
+from tabulate import tabulate
 from poke_env.player import (
     Gen4EnvSinglePlayer,
     MaxBasePowerPlayer,
@@ -31,7 +32,8 @@ class Opponent(Player):
         self.previous_state = None
         self.previous_action = None
         self.current_battle_tag = None
-        self.agent = None
+        self.previous_oldies = None
+        self.agent: PPOAgent = None
 
     def action_to_move(self, action: int, battle: AbstractBattle) -> BattleOrder:
         """Converts actions to move orders.
@@ -78,6 +80,7 @@ class Opponent(Player):
             self.agent.remember(self.previous_state, self.previous_action, 0, st, finished, oldies)
         self.previous_state = st
         self.previous_action = action
+        self.previous_oldies = oldies
 
         return self.action_to_move(action=action, battle=battle)
 
@@ -92,7 +95,7 @@ def create_embedding_layers(input_layer):
             "size": 103, "dims": 52, "in": [107 + i * (233 + 8) for i in range(12)],
         },
         "items": {
-            "size": 39, "dims": 19, "in": [108 + i * (233 + 8) for i in range(12)],
+            "size": 40, "dims": 19, "in": [108 + i * (233 + 8) for i in range(12)],
             # 38 + no_item which is len ITEMS + 1
         },
         "moves": {
@@ -205,6 +208,7 @@ class PPOAgent:
         plt.legend()
 
         plt.tight_layout()
+        plt.savefig('training_history.png')
         plt.show()
 
     def replay(self, batch_size):
@@ -252,12 +256,12 @@ class PPOAgent:
             self.actor_loss_history.append(actor_loss.numpy().item())
 
     def load(self, name):
-        self.actor.load_weights(name + "_actor")
-        self.critic.load_weights(name + "_critic")
+        self.actor.load_weights(name + "_actor.h5")
+        self.critic.load_weights(name + "_critic.h5")
 
     def save(self, name):
-        self.actor.save_weights(name + "_actor")
-        self.critic.save_weights(name + "_critic")
+        self.actor.save_weights(name + "_actor.h5")
+        self.critic.save_weights(name + "_critic.h5")
 
 
 config1, config2 = AccountConfiguration("opp", None), AccountConfiguration("training", None)
@@ -272,43 +276,55 @@ n_action = train_env.action_space_size()
 input_shape = np.array(train_env.observation_space.shape).prod()
 
 # Training loop
-num_episodes = 6
+num_episodes = 4
 batch_size = 2
 num_actions = n_action
 agent = PPOAgent(input_shape=input_shape, num_actions=num_actions)
 opp.agent = agent
 
-train_env.start_challenging(n_challenges=num_episodes)
 
 # Start the battles
-
-for e in range(1, num_episodes + 1):
-    train_env.reset()
-    initial_state = train_env.embed_battle(train_env.current_battle)
-    state = np.reshape(initial_state, [1, agent.input_shape])
-    done = False
-    time = 0
-    while not done:
-        try:
+for i in range(num_episodes):
+    train_env.start_challenging(n_challenges=2)
+    for e in range(2):
+        train_env.reset()
+        initial_state = train_env.embed_battle(train_env.current_battle)
+        state = np.reshape(initial_state, [1, agent.input_shape])
+        done = False
+        time = 0
+        while not done:
             action, old_probs= agent.act(state)
-        except Exception as e:
-            print(e, "AAAAAAAAAAAAAAAAAA")
-            print(state)
-            exit()
-        next_state, reward, done, _, info = train_env.step(action)
-        next_state = np.reshape(train_env.embed_battle(next_state), [1, agent.input_shape])
-        agent.remember(state, action, reward, next_state, done, old_probs)
-        state = next_state
-        if done:
-            print(f"episode: {e}/{num_episodes}, score: {time}")
-        time += 1
-    opponent_last_state = opp.gloria_instance.embed_battle(opp.battles[opp.current_battle_tag])
-    _, opp_actions = opp.gloria_instance.embed_battle(opponent_last_state)
-    agent.remember(opp.previous_state, opp.previous_action, -reward, opponent_last_state, done, opp_actions)
-    opp.current_battle_tag = None  # Reset the battle tag for the opponent
-    # Perform PPO optimization at the end of the episode
-    if len(agent.memory) > batch_size:
-        agent.replay(batch_size)
+            next_state, reward, done, _, info = train_env.step(action)
+            next_state = np.reshape(next_state, [1, agent.input_shape])
+            agent.remember(state, action, reward, next_state, done, old_probs)
+            state = next_state
+            if done:
+                print(f"episode: {e}/{num_episodes}, score: {time}")
+            time += 1
+        opponent_last_state = opp.gloria_instance.embed_battle(opp.battles[opp.current_battle_tag])
+        # _, opp_actions = agent.act(opponent_last_state)
+        agent.remember(opp.previous_state, opp.previous_action, -reward, opponent_last_state, done, opp.previous_oldies)
+        opp.current_battle_tag = None  # Reset the battle tag for the opponent
+        # Perform PPO optimization at the end of the episode
+        if len(agent.memory) > batch_size:
+            agent.replay(batch_size)
+    
+    # run cross evaluation
+    config_eval = AccountConfiguration(f"eval{i}", None)
+    eval_env = Opponent(battle_format="gen4randombattle", account_configuration=config_eval)
+    eval_env.agent = agent
+    players = [eval_env,
+            RandomPlayer(battle_format="gen4randombattle"),
+            MaxBasePowerPlayer(battle_format="gen4randombattle"),
+            SimpleHeuristicsPlayer(battle_format="gen4randombattle")]
+    cross_evaluation = background_cross_evaluate(players, n_challenges=2)
+    cross_results = cross_evaluation.result()
+    table = [["-"] + [p.username for p in players]]
+    for p_1, results in cross_results.items():
+        table.append([p_1] + [cross_results[p_1][p_2] for p_2 in results])
+    print("Cross evaluation:")
+    print(tabulate(table))
+
 
 # Reset environment
 # train_env.reset()
@@ -318,7 +334,7 @@ for e in range(1, num_episodes + 1):
 
 
 # Test Function
-def test(agent, environments, nb_episodes=100):
+def test(agent, environments, nb_episodes=100):  # OUTDATED
     for environment in environments:
         victories = 0
         environment.start_challenging(n_challenges=nb_episodes)
@@ -370,4 +386,4 @@ agent.plot_training_history()
 
 # test(agent, [eval_env, eval_env2, eval_env3], nb_episodes=2)
 
-# agent.model.save("dqn_model.h5")
+agent.save("GlorIA")

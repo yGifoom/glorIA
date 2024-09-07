@@ -11,6 +11,8 @@ dependencies = [
     "black>=24.8.0",
     "tensorflow==2.10",
     "keras>=2.10.0",
+    "matplotlib>=3.9.2",
+    "keras-rl2>=1.0.5",
 ]
 requires-python = "==3.10"
 readme = "README.md"

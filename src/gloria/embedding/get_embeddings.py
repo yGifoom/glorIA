@@ -65,7 +65,7 @@ def count_moves(gen):
     return sorted_moves
 
 
-count_abilities(GEN4)
+# count_abilities(GEN4)
 # count_items(GEN4)
 # count_moves(GEN4)
 # get_pokemons(GEN4)
