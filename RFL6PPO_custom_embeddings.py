@@ -304,78 +304,96 @@ class PPOAgent:
         self.actor.save_weights(name + "_actor.h5")
         self.critic.save_weights(name + "_critic.h5")
 
+def train(trained: int):
+    try:
+        config1, config2 = AccountConfiguration("opp"+str(trained), None), AccountConfiguration("training"+str(trained), None)
 
-config1, config2 = AccountConfiguration("opp", None), AccountConfiguration("training", None)
+        # Instantiate two GlorIA agents
+        randy = RandomPlayer(battle_format="gen4randombattle", account_configuration=AccountConfiguration("rnady", None))
+        opp = Opponent(battle_format="gen4randombattle", account_configuration=config1)
+        train_env = GlorIA(battle_format="gen4randombattle", account_configuration=config2, opponent=opp,
+                        start_challenging=False)
+        # Compute dimensions
+        n_action = train_env.action_space_size()
+        input_shape = np.array(train_env.observation_space.shape).prod()
 
-# Instantiate two GlorIA agents
-randy = RandomPlayer(battle_format="gen4randombattle", account_configuration=AccountConfiguration("rnady", None))
-opp = Opponent(battle_format="gen4randombattle", account_configuration=config1)
-train_env = GlorIA(battle_format="gen4randombattle", account_configuration=config2, opponent=opp,
-                   start_challenging=False)
-# Compute dimensions
-n_action = train_env.action_space_size()
-input_shape = np.array(train_env.observation_space.shape).prod()
+        # Training loop
+        num_episodes = STEPS - trained
+        batch_size = 8
+        num_actions = n_action
+        agent = PPOAgent(input_shape=input_shape, num_actions=num_actions)
+        agent.load("GlorIA"+str(trained))
+        opp.agent = agent
 
-# Training loop
-num_episodes = 8000
-batch_size = 8
-num_actions = n_action
-agent = PPOAgent(input_shape=input_shape, num_actions=num_actions)
-agent.load("GlorIA1900")
-opp.agent = agent
+        evalutation = {}
+        # Start the battles
+        for i in range(num_episodes//1000):
+            train_env.start_challenging(n_challenges=1000)
+            for e in range(1000):
+                train_env.reset()
+                initial_state = train_env.embed_battle(train_env.current_battle)
+                state = np.reshape(initial_state, [1, agent.input_shape])
+                done = False
+                time = 0
+                while not done:
+                    action, old_probs= agent.act(state, train_env.current_battle)
+                    if action is None:
+                        next_state, reward, done, _, info = train_env.step(9)
+                        break
+                    try:
+                        next_state, reward, done, _, info = train_env.step(action)
+                    except RuntimeError:
+                        break
+                    next_state = np.reshape(next_state, [1, agent.input_shape])
+                    agent.remember(state, action, reward, next_state, done, old_probs)
+                    state = next_state
+                    if done:
+                        print(f"episode: {2000+e+i*1000}/{num_episodes}, score: {time}")
+                    time += 1
+                opponent_last_state = opp.gloria_instance.embed_battle(opp.battles[opp.current_battle_tag])
+                # _, opp_actions = agent.act(opponent_last_state)
+                agent.remember(opp.previous_state, opp.previous_action, -reward, opponent_last_state, done, opp.previous_oldies)
+                opp.current_battle_tag = None  # Reset the battle tag for the opponent
+                # Perform PPO optimization at the end of the episode
+                if len(agent.memory) > batch_size:
+                    agent.replay(batch_size)
+                if (e or i) and e % 100 == 0:
+                    with open("eval.json", "w") as f:
+                        json.dump(evalutation, f)
+                    agent.save(f"GlorIA{2000+e+i*1000}")
+            # run cross evaluation
+            config_eval = AccountConfiguration(f"eval{i}", None)
+            eval_env = Opponent(battle_format="gen4randombattle", account_configuration=config_eval)
+            eval_env.agent = agent
+            players = [eval_env,
+                    RandomPlayer(battle_format="gen4randombattle"),
+                    MaxBasePowerPlayer(battle_format="gen4randombattle"),
+                    SimpleHeuristicsPlayer(battle_format="gen4randombattle")]
+            cross_evaluation = background_cross_evaluate(players, n_challenges=100)
+            cross_results = cross_evaluation.result()
+            table = [["-"] + [p.username for p in players]]
+            for p_1, results in cross_results.items():
+                table.append([p_1] + [cross_results[p_1][p_2] for p_2 in results])
+            print("Cross evaluation:")
+            print(tabulate(table))
+            evalutation[i] = table
+            
+        agent.plot_training_history()
+        with open("eval.json", "w") as f:
+            json.dump(evalutation, f)
 
-evalutation = {}
-# Start the battles
-for i in range(num_episodes//1000):
-    train_env.start_challenging(n_challenges=1000)
-    for e in range(1000):
-        train_env.reset()
-        initial_state = train_env.embed_battle(train_env.current_battle)
-        state = np.reshape(initial_state, [1, agent.input_shape])
-        done = False
-        time = 0
-        while not done:
-            action, old_probs= agent.act(state, train_env.current_battle)
-            if action is None:
-                next_state, reward, done, _, info = train_env.step(9)
-                break
-            try:
-                next_state, reward, done, _, info = train_env.step(action)
-            except RuntimeError:
-                break
-            next_state = np.reshape(next_state, [1, agent.input_shape])
-            agent.remember(state, action, reward, next_state, done, old_probs)
-            state = next_state
-            if done:
-                print(f"episode: {2000+e+i*1000}/{num_episodes}, score: {time}")
-            time += 1
-        opponent_last_state = opp.gloria_instance.embed_battle(opp.battles[opp.current_battle_tag])
-        # _, opp_actions = agent.act(opponent_last_state)
-        agent.remember(opp.previous_state, opp.previous_action, -reward, opponent_last_state, done, opp.previous_oldies)
-        opp.current_battle_tag = None  # Reset the battle tag for the opponent
-        # Perform PPO optimization at the end of the episode
-        if len(agent.memory) > batch_size:
-            agent.replay(batch_size)
-        if (e or i) and e % 100 == 0:
-            with open("eval.json", "w") as f:
-                json.dump(evalutation, f)
-            agent.save(f"GlorIA{2000+e+i*1000}")
-    # run cross evaluation
-    config_eval = AccountConfiguration(f"eval{i}", None)
-    eval_env = Opponent(battle_format="gen4randombattle", account_configuration=config_eval)
-    eval_env.agent = agent
-    players = [eval_env,
-            RandomPlayer(battle_format="gen4randombattle"),
-            MaxBasePowerPlayer(battle_format="gen4randombattle"),
-            SimpleHeuristicsPlayer(battle_format="gen4randombattle")]
-    cross_evaluation = background_cross_evaluate(players, n_challenges=100)
-    cross_results = cross_evaluation.result()
-    table = [["-"] + [p.username for p in players]]
-    for p_1, results in cross_results.items():
-        table.append([p_1] + [cross_results[p_1][p_2] for p_2 in results])
-    print("Cross evaluation:")
-    print(tabulate(table))
-    evalutation[i] = table
+        agent.save("GlorIA")
+        
+    except Exception:
+        print("there was an exception, starting training loop again", e)
+        latest_model = i*1000 + (e - e%100)
+        return latest_model
+            
+STEPS = 11000
+mid_step = train(1900)
+while STEPS - mid_step > 0:
+    mid_step = train(mid_step)
+    
 
 # Reset environment
 # train_env.reset()
@@ -433,10 +451,3 @@ eval_env3 = GlorIA(battle_format="gen4randombattle", opponent=heur, start_challe
                    """
 # --------------------------------------------------------------------------------------------------------
 
-agent.plot_training_history()
-with open("eval.json", "w") as f:
-    json.dump(evalutation, f)
-
-# test(agent, [eval_env, eval_env2, eval_env3], nb_episodes=2)
-
-agent.save("GlorIA")
