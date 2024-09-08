@@ -2,6 +2,7 @@ import matplotlib.pyplot as plt
 import tensorflow as tf
 from keras import layers, models
 import numpy as np
+import json
 import random
 from collections import deque
 
@@ -67,6 +68,7 @@ class Opponent(Player):
         elif 0 <= action - 4 < len(battle.available_switches):
             return self.create_order(battle.available_switches[action - 4])
         else:
+            print("Illegal action detected: {}".format(action))
             return self.choose_random_move(battle)
 
     def choose_move(self, battle: AbstractBattle):
@@ -74,7 +76,9 @@ class Opponent(Player):
             self.current_battle_tag = battle.battle_tag
         st = self.gloria_instance.embed_battle(battle)
         st = np.reshape(st, [1, self.agent.input_shape])
-        action, oldies = self.agent.act(st)
+        action, oldies = self.agent.act(st, battle)
+        if action is None:
+            return ForfeitBattleOrder()
         finished = battle.finished
         if self.previous_state is not None:  # also action and reward are None
             self.agent.remember(self.previous_state, self.previous_action, 0, st, finished, oldies)
@@ -89,17 +93,17 @@ def create_embedding_layers(input_layer):
     # max number in vocab, dimentions to be mapped to, slice of input layer to embed
     to_embed = {
         "species": {
-            "size": 296, "dims": 158, "in": [106 + i * (233 + 8) for i in range(12)],
+            "size": 297, "dims": 158, "in": [106 + i * (233 + 8) for i in range(12)],
         },
         "abilities": {
-            "size": 103, "dims": 52, "in": [107 + i * (233 + 8) for i in range(12)],
+            "size": 104, "dims": 52, "in": [107 + i * (233 + 8) for i in range(12)],
         },
         "items": {
             "size": 40, "dims": 19, "in": [108 + i * (233 + 8) for i in range(12)],
             # 38 + no_item which is len ITEMS + 1
         },
         "moves": {
-            "size": 188, "dims": 94, "in": [[109 + j + i * (233 + 8) for j in range(5)] for i in range(12)],
+            "size": 189, "dims": 94, "in": [[109 + j + i * (233 + 8) for j in range(5)] for i in range(12)],
         },
     }
 
@@ -178,12 +182,44 @@ class PPOAgent:
         self.memory = deque(maxlen=2000)
         self.critic_loss_history = []
         self.actor_loss_history = []
+        self.t = 0
+        self.advantage = 0
 
-    def act(self, state):
+    def act(self, state, battle):
         state = np.reshape(state, [1, self.input_shape])
-        action_probs = self.actor.predict(state)[0]
+        try:
+            action_probs = self.actor.predict(state, verbose=0)[0]
+        except:
+            print(state, state.shape)
+            return None, None
+        probs_copy = np.copy(action_probs)
+        for i in range(10):
+            if not self.is_move_legal(i, battle):
+                probs_copy[i] = 1e-10
+        total = np.sum(probs_copy)
+        if total and not np.isnan(total):
+            action_probs = probs_copy / np.sum(probs_copy)
         action = np.random.choice(self.num_actions, p=action_probs)
         return action, action_probs
+    
+    def is_move_legal(self, action, battle):
+        return action == -1 or (
+                action < 4
+                and action < len(battle.available_moves)
+                and not battle.force_switch
+        ) or 0 <= action - 4 < len(battle.available_switches)
+        # if action == -1:
+        #     return True
+        # elif (
+        #         action < 4
+        #         and action < len(battle.available_moves)
+        #         and not battle.force_switch
+        # ):
+        #     return True
+        # elif 0 <= action - 4 < len(battle.available_switches):
+        #     return True
+        # else:
+        #     return False
 
     def remember(self, state, action, reward, next_state, done, old_probs):
         self.memory.append((state, action, reward, next_state, done, old_probs))
@@ -211,11 +247,10 @@ class PPOAgent:
         plt.savefig('training_history.png')
         plt.show()
 
-    def replay(self, batch_size):
+    def replay(self, batch_size, lamb=0.754):
         if len(self.memory) < batch_size:
             return
         minibatch = random.sample(self.memory, batch_size)
-
         for stt, act, rwrd, n_stt, dn, old_action_probs in minibatch:
             stt = np.reshape(stt, [1, self.input_shape])
             n_stt = np.reshape(n_stt, [1, self.input_shape])
@@ -223,13 +258,15 @@ class PPOAgent:
             with tf.GradientTape() as tape:
                 value = self.critic(stt)
                 next_value = self.critic(n_stt)
+                self.t += 1
                 target = rwrd + (1 - dn) * self.gamma * next_value
-                advantage = target - value
+                self.advantage += (target - value)*((self.gamma * lamb)**self.t)
 
                 # Instantiate the loss function and compute the loss
                 mse_loss_fn = tf.keras.losses.MeanSquaredError()
                 critic_loss = mse_loss_fn(target, value)
 
+           
             critic_grads = tape.gradient(critic_loss, self.critic.trainable_variables)
             # Check if gradients are None
             if any(grad is None for grad in critic_grads):
@@ -242,18 +279,22 @@ class PPOAgent:
             with tf.GradientTape() as tape:
                 # Calculate the PPO loss for the actor network
                 action_probs = self.actor(stt)
-                action_prob = action_probs[0][action]
-                old_action_prob = old_action_probs[action]
+                action_prob = action_probs[0][act]
+                old_action_prob = old_action_probs[act]
                 ratio = action_prob / old_action_prob
-                surrogate1 = ratio * advantage
-                surrogate2 = tf.clip_by_value(ratio, 1 - self.epsilon, 1 + self.epsilon) * advantage
+                surrogate1 = ratio * self.advantage
+                surrogate2 = tf.clip_by_value(ratio, 1 - self.epsilon, 1 + self.epsilon) * self.advantage
                 actor_loss = -tf.minimum(surrogate1, surrogate2)
-                actor_loss += action_prob * np.log(action_prob)
+                entropy = 0
+                for i in action_probs.numpy()[0]:
+                    if i != 0:
+                        entropy += i * np.log(i)
+                actor_loss += 0.0588 * entropy
+                actor_loss *= 0.5
+                actor_loss -= critic_loss
 
             actor_grads = tape.gradient(actor_loss, self.actor.trainable_variables)
             actor_grads, global_norm = tf.clip_by_global_norm(actor_grads, 0.54)
-            self.actor_optimizer.apply_gradients(zip(actor_grads, self.actor.trainable_variables))
-            self.actor_loss_history.append(actor_loss.numpy().item())
 
     def load(self, name):
         self.actor.load_weights(name + "_actor.h5")
@@ -276,30 +317,37 @@ n_action = train_env.action_space_size()
 input_shape = np.array(train_env.observation_space.shape).prod()
 
 # Training loop
-num_episodes = 4
-batch_size = 2
+num_episodes = 8000
+batch_size = 8
 num_actions = n_action
 agent = PPOAgent(input_shape=input_shape, num_actions=num_actions)
+agent.load("GlorIA1900")
 opp.agent = agent
 
-
+evalutation = {}
 # Start the battles
-for i in range(num_episodes):
-    train_env.start_challenging(n_challenges=2)
-    for e in range(2):
+for i in range(num_episodes//1000):
+    train_env.start_challenging(n_challenges=1000)
+    for e in range(1000):
         train_env.reset()
         initial_state = train_env.embed_battle(train_env.current_battle)
         state = np.reshape(initial_state, [1, agent.input_shape])
         done = False
         time = 0
         while not done:
-            action, old_probs= agent.act(state)
-            next_state, reward, done, _, info = train_env.step(action)
+            action, old_probs= agent.act(state, train_env.current_battle)
+            if action is None:
+                next_state, reward, done, _, info = train_env.step(9)
+                break
+            try:
+                next_state, reward, done, _, info = train_env.step(action)
+            except RuntimeError:
+                break
             next_state = np.reshape(next_state, [1, agent.input_shape])
             agent.remember(state, action, reward, next_state, done, old_probs)
             state = next_state
             if done:
-                print(f"episode: {e}/{num_episodes}, score: {time}")
+                print(f"episode: {2000+e+i*1000}/{num_episodes}, score: {time}")
             time += 1
         opponent_last_state = opp.gloria_instance.embed_battle(opp.battles[opp.current_battle_tag])
         # _, opp_actions = agent.act(opponent_last_state)
@@ -308,7 +356,10 @@ for i in range(num_episodes):
         # Perform PPO optimization at the end of the episode
         if len(agent.memory) > batch_size:
             agent.replay(batch_size)
-    
+        if (e or i) and e % 100 == 0:
+            with open("eval.json", "w") as f:
+                json.dump(evalutation, f)
+            agent.save(f"GlorIA{2000+e+i*1000}")
     # run cross evaluation
     config_eval = AccountConfiguration(f"eval{i}", None)
     eval_env = Opponent(battle_format="gen4randombattle", account_configuration=config_eval)
@@ -317,14 +368,14 @@ for i in range(num_episodes):
             RandomPlayer(battle_format="gen4randombattle"),
             MaxBasePowerPlayer(battle_format="gen4randombattle"),
             SimpleHeuristicsPlayer(battle_format="gen4randombattle")]
-    cross_evaluation = background_cross_evaluate(players, n_challenges=2)
+    cross_evaluation = background_cross_evaluate(players, n_challenges=100)
     cross_results = cross_evaluation.result()
     table = [["-"] + [p.username for p in players]]
     for p_1, results in cross_results.items():
         table.append([p_1] + [cross_results[p_1][p_2] for p_2 in results])
     print("Cross evaluation:")
     print(tabulate(table))
-
+    evalutation[i] = table
 
 # Reset environment
 # train_env.reset()
@@ -383,6 +434,8 @@ eval_env3 = GlorIA(battle_format="gen4randombattle", opponent=heur, start_challe
 # --------------------------------------------------------------------------------------------------------
 
 agent.plot_training_history()
+with open("eval.json", "w") as f:
+    json.dump(evalutation, f)
 
 # test(agent, [eval_env, eval_env2, eval_env3], nb_episodes=2)
 
