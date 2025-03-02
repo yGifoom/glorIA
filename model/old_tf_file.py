@@ -189,28 +189,3 @@ def test(agent, environment, nb_episodes=100):
                 print(f"Episode {e + 1}/{nb_episodes} finished. Reward: {reward}")
     print(f"Test completed: {victories}/{nb_episodes} victories")
     environment.close()
-
-
-# Players and Environments setup (ignore) --------------------------------------------------------------
-opponent = RandomPlayer(battle_format="gen4randombattle",
-                        account_configuration=config3)
-eval_env = SimpleRLPlayer(
-    battle_format="gen4randombattle", opponent=opponent, start_challenging=True,
-    account_configuration=config6
-)
-opp_maxi = AccountConfiguration("max", None)
-opp_heur = AccountConfiguration("heur", None)
-maxi = MaxBasePowerPlayer(battle_format="gen4randombattle",
-                          account_configuration=opp_maxi)
-heur = SimpleHeuristicsPlayer(battle_format="gen4randombattle",
-                              account_configuration=opp_heur)
-eval2 = AccountConfiguration("trained_vs_maxi", None)
-eval3 = AccountConfiguration("trained_vs_heur", None)
-eval_env2 = SimpleRLPlayer(battle_format="gen4randombattle", opponent=maxi, start_challenging=True,
-                           account_configuration=eval2)
-eval_env3 = SimpleRLPlayer(battle_format="gen4randombattle", opponent=heur, start_challenging=True,
-                           account_configuration=eval3)
-#--------------------------------------------------------------------------------------------------------
-
-
-# agent.model.save("dqn_model.h5")

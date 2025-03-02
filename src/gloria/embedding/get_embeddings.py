@@ -185,7 +185,7 @@ class GlorIA(Gen4EnvSinglePlayer):  # not inhereting from Gen4EnvSinglePlayer te
         return f"{pkmn_id[:2]}a{pkmn_id[2:]}"
 
 
-    def calc_reward(self, last_battle, current_battle) -> float:
+    def calc_reward(self, current_battle) -> float:
         return self.reward_computing_helper(current_battle, victory_value=1.0)
 
     def describe_embedding(self):
